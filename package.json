@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy:dot": "dot deploy --domain hello-playground",
+    "postinstall": "papi generate"
   },
   "dependencies": {
     "@ensdomains/content-hash": "^3.0.0",

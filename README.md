@@ -93,6 +93,34 @@ npm run dev
 
 Open the dev server. The editor + preview should both render with the default content. The Deploy button works against the in-memory preview today — wire up the chain submission next.
 
+## Deploy this app to `hello-playground.dot.li`
+
+The deployer itself ships via [playground-cli](https://github.com/paritytech/playground-cli) (the `dot` command). It builds `dist/`, uploads the static bundle to Bulletin, and registers `hello-playground.dot` on DotNS — pointing at the resulting CID.
+
+```sh
+# one-time: install + provision session keys
+curl -fsSL https://raw.githubusercontent.com/paritytech/playground-cli/main/install.sh | bash
+dot init
+
+# every release: build is auto-run by the CLI
+npm run deploy:dot -- --signer phone
+```
+
+For unattended / CI deploys, swap the signer for a dev keypair:
+
+```sh
+npm run deploy:dot -- --signer dev --suri //Alice
+```
+
+Useful flags to pass through (`npm run deploy:dot -- ...`):
+
+- `--playground` — publish to the Playground registry so it appears in users' "my apps".
+- `--moddable` — publish the source repo URL so others can `dot mod hello-playground`.
+- `--no-build` — skip the Vite build (assume `dist/` is already current).
+- `--env <paseo-next-v2|testnet|mainnet>` — target network (default matches what the app talks to in-browser).
+
+The signer hostname mapping in `src/signer.ts::getProductAccountIdentifier` already collapses `hello-playground.dot.li` back to the `hello-playground.dot` product identifier, so host-signed flows keep working under the deployed origin.
+
 ## Conventions
 
 - React 19 + Vite + TypeScript. Plain CSS with custom-property tokens (not Tailwind — see "design system" note below).
