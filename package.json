@@ -15,6 +15,7 @@
     "@novasamatech/product-sdk": "0.7.8",
     "@parity/product-sdk-address": "^0.1.1",
     "@parity/product-sdk-crypto": "^0.1.1",
+    "@parity/product-sdk-descriptors": "^0.3.0",
     "@parity/product-sdk-host": "^0.2.0",
     "@parity/product-sdk-keys": "^0.2.0",
     "@parity/product-sdk-logger": "^0.1.1",

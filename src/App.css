@@ -295,3 +295,27 @@ main {
     border-radius: 4px;
     font-size: 11px;
 }
+.result-note.success { color: #6ee7b7; }
+.result-stored { border-color: rgba(110, 231, 183, 0.3); }
+
+.status {
+    color: var(--text2);
+    font-size: 13px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+}
+
+.error-block {
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: var(--radius);
+    padding: 12px 14px;
+    color: var(--danger);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+}

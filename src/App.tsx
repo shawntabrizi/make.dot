@@ -2,7 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Editor } from "./Editor.tsx";
 import { Preview } from "./Preview.tsx";
 import { DEFAULT_CONTENT, renderHtml, type SiteContent } from "./template.ts";
-import { previewDeploy, type DeployPreview } from "./deploy.ts";
+import {
+    deployToBulletin,
+    previewDeploy,
+    type DeployPreview,
+    type DeploySuccess,
+} from "./deploy.ts";
 import {
     type ActiveAccount,
     getDevAccount,
@@ -11,16 +16,16 @@ import {
     tryHostAccount,
 } from "./account.ts";
 
+type DeployResult = DeployPreview | DeploySuccess;
+
 export default function App() {
     const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
-    const [result, setResult] = useState<DeployPreview | null>(null);
+    const [status, setStatus] = useState<string | null>(null);
+    const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
 
-    // Account state. Three independent slots — `useDev` always wins, otherwise
-    // extension > host. This way toggling the dev checkbox doesn't tear down
-    // a live host/extension connection.
     const [useDev, setUseDev] = useState(false);
     const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
@@ -52,7 +57,7 @@ export default function App() {
                 setExtensionAccount(account);
             } else {
                 setExtensionError(
-                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or check the //Bob box below.",
+                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or tick //Bob below.",
                 );
             }
         } catch (cause) {
@@ -64,19 +69,27 @@ export default function App() {
         setBusy(true);
         setResult(null);
         setDeployError(null);
+        setStatus(null);
         try {
-            const preview = await previewDeploy(renderHtml(content), domain || null);
-            setResult(preview);
+            const html = renderHtml(content);
+            // Only the //Bob path actually hits chain today. Host's signer is
+            // stubbed; extension accounts may not have Bulletin authorization
+            // — both fall back to a no-op preview.
+            if (activeAccount?.source === "dev") {
+                const stored = await deployToBulletin(html, domain || null, activeAccount, setStatus);
+                setResult(stored);
+            } else {
+                const preview = await previewDeploy(html, domain || null);
+                setResult(preview);
+            }
         } catch (cause) {
             setDeployError(cause instanceof Error ? cause.message : String(cause));
         } finally {
             setBusy(false);
+            setStatus(null);
         }
     };
 
-    // We surface the host-failed hint only when host attempted, no other
-    // signer is active, and dev isn't toggled — to avoid noise once the user
-    // has picked an alternative.
     const showStandaloneHints =
         hostAttempted && !hostAccount && !extensionAccount && !useDev;
 
@@ -143,6 +156,8 @@ export default function App() {
                         )}
                     </div>
 
+                    {busy && status && <p className="status">{status}</p>}
+
                     {showStandaloneHints && (
                         <p className="hint">
                             Host signer not available — open in{" "}
@@ -157,33 +172,8 @@ export default function App() {
                     )}
                     {extensionError && <p className="error">{extensionError}</p>}
 
-                    {result && (
-                        <div className="result">
-                            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
-                            <Row label="CID" mono>
-                                {result.cid}
-                            </Row>
-                            <Row label="would deploy to">
-                                <a
-                                    href={result.url}
-                                    target="_blank"
-                                    rel="noopener"
-                                    onClick={(e) => e.preventDefault()}
-                                >
-                                    {result.url}
-                                </a>
-                            </Row>
-                            <Row label="signed by">
-                                {activeAccount
-                                    ? `${activeAccount.displayName} (${activeAccount.source})`
-                                    : "— no signer selected —"}
-                            </Row>
-                            <p className="result-note">
-                                Chain submission is not yet wired — see <code>src/deploy.ts</code>.
-                            </p>
-                        </div>
-                    )}
-                    {deployError && <p className="error">{deployError}</p>}
+                    {result && <ResultCard result={result} account={activeAccount} />}
+                    {deployError && <pre className="error error-block">{deployError}</pre>}
                 </section>
 
                 <section className="pane preview-pane">
@@ -191,6 +181,57 @@ export default function App() {
                 </section>
             </main>
         </>
+    );
+}
+
+function ResultCard({
+    result,
+    account,
+}: {
+    result: DeployResult;
+    account: ActiveAccount | null;
+}) {
+    return (
+        <div className={`result result-${result.kind}`}>
+            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
+            <Row label="CID" mono>
+                {result.cid}
+            </Row>
+            <Row label="gateway">
+                <a href={result.gatewayUrl} target="_blank" rel="noopener">
+                    {result.gatewayUrl}
+                </a>
+            </Row>
+            <Row label="would resolve to">
+                <a
+                    href={result.url}
+                    target="_blank"
+                    rel="noopener"
+                    onClick={(e) => e.preventDefault()}
+                >
+                    {result.url}
+                </a>
+            </Row>
+            <Row label="signed by">
+                {account ? `${account.displayName} (${account.source})` : "— no signer —"}
+            </Row>
+            {result.kind === "stored" ? (
+                <>
+                    <Row label="block">
+                        #{result.blockNumber.toLocaleString()} tx[{result.txIndex}]
+                    </Row>
+                    <p className="result-note success">
+                        Stored on Bulletin Chain. Fetch the bytes via the gateway link above.
+                        DotNS register (the <code>.dot.li</code> mapping) is not wired yet.
+                    </p>
+                </>
+            ) : (
+                <p className="result-note">
+                    Preview only — chain submission for {account?.source ?? "this signer"} is not
+                    wired. Tick the //Bob box to do an end-to-end deploy.
+                </p>
+            )}
+        </div>
     );
 }
 
