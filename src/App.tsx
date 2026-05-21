@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Editor } from "./Editor.tsx";
-import { Preview } from "./Preview.tsx";
-import { DEFAULT_CONTENT, renderHtml, type SiteContent } from "./template.ts";
+import { Editable } from "./Editable.tsx";
+import {
+    DEFAULT_CONTENT,
+    FONT_OPTIONS,
+    renderHtml,
+    type Block,
+    type SiteContent,
+} from "./template.ts";
 import {
     deployFull,
     previewDeploy,
@@ -18,17 +23,29 @@ import {
 
 type DeployResult = DeployPreview | DeploySuccess;
 
+function makeBlockId(): string {
+    return Math.random().toString(36).slice(2, 10);
+}
+
+const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
+    paragraph: () => ({ id: makeBlockId(), type: "paragraph", text: "Write something here…" }),
+    link: () => ({ id: makeBlockId(), type: "link", label: "Link text", url: "https://" }),
+    image: () => ({ id: makeBlockId(), type: "image", url: "https://", alt: "" }),
+    divider: () => ({ id: makeBlockId(), type: "divider" }),
+};
+
 export default function App() {
     const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
+    const [editMode, setEditMode] = useState(true); // Land in edit mode so the affordances are immediately discoverable.
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
+    const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [showSettings, setShowSettings] = useState(false);
 
-    // //Bob is the default. Users opt INTO their own account; the auto-host
-    // probe doesn't run until they ask for it, which keeps the standalone
-    // browser case quiet.
+    // Signer state — Bob default, owned-account opt-in.
     const [useOwnedAccount, setUseOwnedAccount] = useState(false);
     const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
@@ -40,10 +57,6 @@ export default function App() {
         ? extensionAccount ?? hostAccount
         : devAccount;
 
-    // When the user toggles ON "sign with my own account", try the host signer
-    // (Polkadot Desktop / Mobile) once. If host fails, the "Connect browser
-    // wallet" button below offers the standalone fallback. Toggling OFF
-    // doesn't tear down the resolved account — the dev path simply ignores it.
     useEffect(() => {
         if (!useOwnedAccount || hostAccount || extensionAccount) return;
         setResolvingOwned(true);
@@ -58,17 +71,30 @@ export default function App() {
             .finally(() => setResolvingOwned(false));
     }, [useOwnedAccount, hostAccount, extensionAccount]);
 
+    const update = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) =>
+        setContent((prev) => ({ ...prev, [key]: value }));
+
+    const updateBlock = (id: string, patcher: (b: Block) => Block) =>
+        setContent((prev) => ({
+            ...prev,
+            blocks: prev.blocks.map((b) => (b.id === id ? patcher(b) : b)),
+        }));
+    const removeBlock = (id: string) =>
+        setContent((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
+    const addBlock = (type: Block["type"]) => {
+        setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
+        setAddMenuOpen(false);
+    };
+
     const connectExtension = async () => {
         setOwnedError(null);
         try {
             const account = await tryExtensionAccount();
-            if (account) {
-                setExtensionAccount(account);
-            } else {
+            if (account) setExtensionAccount(account);
+            else
                 setOwnedError(
                     "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or untick the box to deploy as //Bob.",
                 );
-            }
         } catch (cause) {
             setOwnedError(cause instanceof Error ? cause.message : String(cause));
         }
@@ -96,33 +122,143 @@ export default function App() {
         }
     };
 
-    // The Deploy button stays enabled when Bob is selected (always available)
-    // OR when the user has actually resolved an owned account. Going through
-    // "owned mode" without a signer would deploy nothing.
     const canDeploy = !busy && activeAccount !== null;
     const showOwnedHint =
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
+    // Site styles — applied to the live editing surface AND honoured by the
+    // deploy serializer (template.ts::renderHtml). Single source of truth.
+    const siteStyle = {
+        background: content.background,
+        fontFamily: content.fontFamily,
+    } as const;
+
     return (
         <>
-            <header>
-                <h1>hello-playground</h1>
-                {activeAccount ? (
-                    <span className={`address-chip source-${activeAccount.source}`}>
-                        {activeAccount.displayName}
-                    </span>
-                ) : (
-                    <span className="status-chip">
-                        {resolvingOwned ? "connecting…" : "no signer"}
-                    </span>
+            <main className={`site ${editMode ? "is-editing" : ""}`} style={siteStyle}>
+                <article className="site-inner">
+                    <Editable
+                        tag="h1"
+                        value={content.header}
+                        onChange={(v) => update("header", v)}
+                        editable={editMode}
+                        className="site-header"
+                        style={{ color: content.accentColor }}
+                        ariaLabel="Page header"
+                        placeholder="Your big heading"
+                    />
+                    <Editable
+                        tag="p"
+                        value={content.subheader}
+                        onChange={(v) => update("subheader", v)}
+                        editable={editMode}
+                        className="site-subheader"
+                        ariaLabel="Page subheader"
+                        placeholder="Subheader text"
+                    />
+                    {content.blocks.map((block) => (
+                        <BlockView
+                            key={block.id}
+                            block={block}
+                            accentColor={content.accentColor}
+                            editable={editMode}
+                            onUpdate={(b) => updateBlock(block.id, () => b)}
+                            onRemove={() => removeBlock(block.id)}
+                        />
+                    ))}
+                    {editMode && content.blocks.length === 0 && (
+                        <p className="site-tip">
+                            Tip: click any text to edit. Use the + button in the corner to
+                            add sections.
+                        </p>
+                    )}
+                </article>
+            </main>
+
+            {/* Top-right floating: Edit ↔ Done toggle + action bar (edit only) */}
+            <div className="float-top">
+                <button
+                    className="pill pill-toggle"
+                    onClick={() => {
+                        setEditMode((v) => !v);
+                        setAddMenuOpen(false);
+                    }}
+                    aria-pressed={editMode}
+                >
+                    {editMode ? "Done" : "Edit"}
+                </button>
+                {editMode && (
+                    <div className="action-bar" role="toolbar" aria-label="Site styling">
+                        <ColorSwatch
+                            label="Accent"
+                            value={content.accentColor}
+                            onChange={(v) => update("accentColor", v)}
+                        />
+                        <ColorSwatch
+                            label="Bg"
+                            value={content.background}
+                            onChange={(v) => update("background", v)}
+                        />
+                        <select
+                            className="action-select"
+                            value={content.fontFamily}
+                            onChange={(e) => update("fontFamily", e.target.value)}
+                            aria-label="Font family"
+                        >
+                            {FONT_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                </option>
+                            ))}
+                        </select>
+                        <div className="add-wrap">
+                            <button
+                                className="action-btn"
+                                onClick={() => setAddMenuOpen((v) => !v)}
+                                aria-haspopup="menu"
+                                aria-expanded={addMenuOpen}
+                                title="Add element"
+                            >
+                                +
+                            </button>
+                            {addMenuOpen && (
+                                <div className="add-menu" role="menu">
+                                    <button onClick={() => addBlock("paragraph")}>
+                                        Paragraph
+                                    </button>
+                                    <button onClick={() => addBlock("link")}>Link</button>
+                                    <button onClick={() => addBlock("image")}>Image</button>
+                                    <button onClick={() => addBlock("divider")}>Divider</button>
+                                </div>
+                            )}
+                        </div>
+                        <button
+                            className={`action-btn ${showSettings ? "is-active" : ""}`}
+                            onClick={() => setShowSettings((v) => !v)}
+                            aria-pressed={showSettings}
+                            title="Settings"
+                        >
+                            ⚙
+                        </button>
+                    </div>
                 )}
-            </header>
+            </div>
 
-            <main>
-                <section className="pane editor-pane">
-                    <Editor value={content} onChange={setContent} />
+            {/* Bottom-right floating: Deploy. Visible in both modes. */}
+            <div className="float-bottom">
+                <button
+                    className="pill pill-primary"
+                    onClick={deploy}
+                    disabled={!canDeploy}
+                >
+                    {busy ? "Deploying…" : "Deploy"}
+                </button>
+            </div>
 
-                    <div className="deploy-bar">
+            {/* Settings sheet — slides up bottom-right (desktop) / full-width (mobile) */}
+            {showSettings && (
+                <div className="settings-sheet" role="dialog" aria-label="Settings">
+                    <div className="settings-row">
                         <label className="field">
                             <span className="field-label">.dot name</span>
                             <input
@@ -132,16 +268,18 @@ export default function App() {
                                 onChange={(e) => setDomain(e.target.value.trim())}
                             />
                         </label>
-                        <button
-                            className="btn btn-primary"
-                            onClick={deploy}
-                            disabled={!canDeploy}
-                        >
-                            {busy ? "Deploying…" : "Deploy"}
-                        </button>
                     </div>
-
-                    <div className="signer-bar">
+                    <div className="settings-row">
+                        <span className="account-chip">
+                            <span className={`source-dot source-${activeAccount?.source ?? "none"}`} />
+                            {activeAccount
+                                ? `${activeAccount.displayName} (${activeAccount.source})`
+                                : resolvingOwned
+                                  ? "connecting…"
+                                  : "no signer"}
+                        </span>
+                    </div>
+                    <div className="settings-row">
                         <label className="checkbox">
                             <input
                                 type="checkbox"
@@ -150,111 +288,251 @@ export default function App() {
                             />
                             <span>
                                 Sign with my own account
-                                <span className="checkbox-hint">
-                                    {" "}— default is //Bob (shared testnet)
-                                </span>
+                                <span className="checkbox-hint"> — default is //Bob</span>
                             </span>
                         </label>
-                        {useOwnedAccount && !hostAccount && !extensionAccount && (
+                    </div>
+                    {useOwnedAccount && !hostAccount && !extensionAccount && (
+                        <div className="settings-row">
                             <button
-                                className="btn btn-secondary"
+                                className="pill pill-secondary"
                                 onClick={connectExtension}
                                 disabled={!hasInjectedExtension() || resolvingOwned}
-                                title={
-                                    hasInjectedExtension()
-                                        ? "Connect Talisman, SubWallet, or Polkadot.js"
-                                        : "No browser wallet detected"
-                                }
                             >
                                 Connect browser wallet
                             </button>
-                        )}
-                    </div>
-
-                    {busy && status && <p className="status">{status}</p>}
-
+                        </div>
+                    )}
                     {showOwnedHint && (
                         <p className="hint">
                             No host signer detected. Open this app in{" "}
                             <strong>Polkadot Desktop</strong> or{" "}
-                            <strong>Polkadot Mobile</strong> to sign with your account, or
-                            click <strong>Connect browser wallet</strong>. Untick the box to
-                            deploy as //Bob (no setup needed).
+                            <strong>Polkadot Mobile</strong>, click{" "}
+                            <strong>Connect browser wallet</strong>, or untick the box to
+                            deploy as //Bob.
                         </p>
                     )}
                     {ownedError && <p className="hint subtle">{ownedError}</p>}
+                </div>
+            )}
 
-                    {result && <ResultCard result={result} account={activeAccount} />}
-                    {deployError && <pre className="error error-block">{deployError}</pre>}
-                </section>
-
-                <section className="pane preview-pane">
-                    <Preview content={content} />
-                </section>
-            </main>
+            {(busy || result || deployError) && (
+                <DeployOverlay
+                    busy={busy}
+                    status={status}
+                    result={result}
+                    error={deployError}
+                    account={activeAccount}
+                    onDismiss={() => {
+                        setResult(null);
+                        setDeployError(null);
+                    }}
+                />
+            )}
         </>
     );
 }
 
-function ResultCard({
-    result,
-    account,
+function ColorSwatch({
+    label,
+    value,
+    onChange,
 }: {
-    result: DeployResult;
-    account: ActiveAccount | null;
+    label: string;
+    value: string;
+    onChange: (next: string) => void;
 }) {
     return (
-        <div className={`result result-${result.kind}`}>
-            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
-            <Row label="CID" mono>
-                {result.cid}
-            </Row>
-            <Row label="gateway">
-                <a href={result.gatewayUrl} target="_blank" rel="noopener">
-                    {result.gatewayUrl}
-                </a>
-            </Row>
-            <Row label="would resolve to">
-                <a
-                    href={result.url}
-                    target="_blank"
-                    rel="noopener"
-                    onClick={(e) => e.preventDefault()}
+        <label
+            className="swatch"
+            title={`${label}: ${value}`}
+            style={{ background: value }}
+        >
+            <span className="sr-only">{label}</span>
+            <input
+                type="color"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                aria-label={`${label} color`}
+            />
+        </label>
+    );
+}
+
+function BlockView({
+    block,
+    accentColor,
+    editable,
+    onUpdate,
+    onRemove,
+}: {
+    block: Block;
+    accentColor: string;
+    editable: boolean;
+    onUpdate: (next: Block) => void;
+    onRemove: () => void;
+}) {
+    return (
+        <div className={`block ${editable ? "is-editing" : ""}`}>
+            {editable && (
+                <button
+                    className="block-remove"
+                    onClick={onRemove}
+                    aria-label={`Remove ${block.type}`}
+                    title="Remove"
                 >
-                    {result.url}
-                </a>
-            </Row>
-            <Row label="signed by">
-                {account ? `${account.displayName} (${account.source})` : "— no signer —"}
-            </Row>
-            {result.kind === "stored" ? (
-                <>
-                    <Row label="block">#{result.blockNumber.toLocaleString()}</Row>
-                    {result.dotMapped ? (
-                        <p className="result-note success">
-                            Live on{" "}
-                            <a href={result.url} target="_blank" rel="noopener">
-                                {result.url}
-                            </a>
-                            . The <code>.dot</code> name is registered to your account and
-                            points at the Bulletin-stored content. Resolution may take a few
-                            seconds to propagate.
-                        </p>
+                    ×
+                </button>
+            )}
+            {block.type === "paragraph" && (
+                <Editable
+                    tag="p"
+                    value={block.text}
+                    onChange={(text) => onUpdate({ ...block, text })}
+                    editable={editable}
+                    className="site-paragraph"
+                    placeholder="Paragraph text"
+                />
+            )}
+            {block.type === "link" && (
+                <p className="block-link">
+                    {editable ? (
+                        <>
+                            <Editable
+                                tag="span"
+                                value={block.label}
+                                onChange={(label) => onUpdate({ ...block, label })}
+                                editable
+                                className="site-link"
+                                style={{ color: accentColor }}
+                                placeholder="Link text"
+                            />
+                            <Editable
+                                tag="span"
+                                value={block.url}
+                                onChange={(url) => onUpdate({ ...block, url })}
+                                editable
+                                className="site-link-url"
+                                placeholder="https://"
+                            />
+                        </>
                     ) : (
-                        <p className="result-note">
-                            Stored on Bulletin Chain ✓. The <code>.dot.li</code> mapping
-                            step failed — see the status banner above for the reason. The
-                            bytes are still retrievable via the gateway link.
-                        </p>
+                        <a
+                            href={block.url}
+                            target="_blank"
+                            rel="noopener"
+                            className="site-link"
+                            style={{ color: accentColor }}
+                        >
+                            {block.label}
+                        </a>
                     )}
-                </>
-            ) : (
-                <p className="result-note">
-                    Preview only — chain submission for {account?.source ?? "this signer"}{" "}
-                    is not wired. Untick "Sign with my own account" to do an end-to-end
-                    deploy as //Bob.
                 </p>
             )}
+            {block.type === "image" && (
+                <>
+                    {block.url && block.url !== "https://" ? (
+                        <img className="site-image" src={block.url} alt={block.alt} />
+                    ) : editable ? (
+                        <div className="site-image-placeholder">No image URL yet</div>
+                    ) : null}
+                    {editable && (
+                        <Editable
+                            tag="span"
+                            value={block.url}
+                            onChange={(url) => onUpdate({ ...block, url })}
+                            editable
+                            className="site-link-url"
+                            placeholder="https:// image URL"
+                        />
+                    )}
+                </>
+            )}
+            {block.type === "divider" && <hr className="site-divider" />}
+        </div>
+    );
+}
+
+function DeployOverlay({
+    busy,
+    status,
+    result,
+    error,
+    account,
+    onDismiss,
+}: {
+    busy: boolean;
+    status: string | null;
+    result: DeployResult | null;
+    error: string | null;
+    account: ActiveAccount | null;
+    onDismiss: () => void;
+}) {
+    return (
+        <div className="overlay" role="dialog" aria-live="polite">
+            <div className="overlay-card">
+                {busy && (
+                    <>
+                        <h3>Deploying…</h3>
+                        <p className="status">{status ?? "Starting up"}</p>
+                    </>
+                )}
+                {!busy && result && (
+                    <>
+                        <h3>{result.kind === "stored" ? "Deployed" : "Preview"}</h3>
+                        <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
+                        <Row label="CID" mono>
+                            {result.cid}
+                        </Row>
+                        <Row label="gateway">
+                            <a href={result.gatewayUrl} target="_blank" rel="noopener">
+                                {result.gatewayUrl}
+                            </a>
+                        </Row>
+                        {result.kind === "stored" && (
+                            <Row label="block">#{result.blockNumber.toLocaleString()}</Row>
+                        )}
+                        <Row label="signed by">
+                            {account
+                                ? `${account.displayName} (${account.source})`
+                                : "— no signer —"}
+                        </Row>
+                        {result.kind === "stored" && result.dotMapped ? (
+                            <p className="result-note success">
+                                Live on{" "}
+                                <a href={result.url} target="_blank" rel="noopener">
+                                    {result.url}
+                                </a>
+                                . Resolution may take a few seconds to propagate.
+                            </p>
+                        ) : result.kind === "stored" ? (
+                            <p className="result-note">
+                                Stored on Bulletin ✓. The <code>.dot.li</code> mapping
+                                step failed — see status banner for details. Bytes still
+                                retrievable via the gateway link above.
+                            </p>
+                        ) : (
+                            <p className="result-note">
+                                Preview only — chain submission for{" "}
+                                {account?.source ?? "this signer"} isn't wired. Untick
+                                "Sign with my own account" to deploy as //Bob.
+                            </p>
+                        )}
+                        <button className="pill pill-secondary" onClick={onDismiss}>
+                            Close
+                        </button>
+                    </>
+                )}
+                {!busy && error && (
+                    <>
+                        <h3>Deploy failed</h3>
+                        <pre className="error error-block">{error}</pre>
+                        <button className="pill pill-secondary" onClick={onDismiss}>
+                            Close
+                        </button>
+                    </>
+                )}
+            </div>
         </div>
     );
 }
