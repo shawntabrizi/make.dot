@@ -20,6 +20,8 @@ import {
     tryExtensionAccount,
     tryHostAccount,
 } from "./account.ts";
+import { checkBulletinAuthorization, storeBytes } from "./lib/bulletin/store.ts";
+import { resizeImageToFit } from "./image-resize.ts";
 
 type View = "edit" | "preview" | "deploy";
 type DeployResult = DeployPreview | DeploySuccess;
@@ -81,6 +83,7 @@ export default function App() {
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
     const [resolvingOwned, setResolvingOwned] = useState(false);
     const [ownedError, setOwnedError] = useState<string | null>(null);
+    const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
 
     const devAccount = useMemo(() => getDevAccount(), []);
     const activeAccount: ActiveAccount | null = useOwnedAccount
@@ -101,6 +104,26 @@ export default function App() {
             .finally(() => setResolvingOwned(false));
     }, [useOwnedAccount, hostAccount, extensionAccount]);
 
+    useEffect(() => {
+        const address = activeAccount?.address;
+        if (!address) {
+            setMaxStoreBytes(null);
+            return;
+        }
+        let cancelled = false;
+        checkBulletinAuthorization(address)
+            .then((auth) => {
+                if (cancelled) return;
+                setMaxStoreBytes(auth.authorized ? Number(auth.bytes) : 0);
+            })
+            .catch(() => {
+                if (!cancelled) setMaxStoreBytes(null);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [activeAccount?.address]);
+
     const update = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) =>
         setContent((prev) => ({ ...prev, [key]: value }));
     const updateBlock = (id: string, patcher: (b: Block) => Block) =>
@@ -113,6 +136,42 @@ export default function App() {
     const addBlock = (type: Block["type"]) => {
         setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
         setAddMenuOpen(false);
+    };
+
+    const uploadImage = async (
+        file: File,
+        onStatus: (msg: string) => void,
+    ): Promise<string> => {
+        if (!activeAccount) {
+            throw new Error(
+                "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
+            );
+        }
+        let bytes: Uint8Array;
+        let label = `Image (${file.name || "untitled"})`;
+        if (maxStoreBytes !== null && file.size > maxStoreBytes) {
+            onStatus(
+                `Resizing ${(file.size / 1024).toFixed(0)} KB → under ${(maxStoreBytes / 1024).toFixed(0)} KB…`,
+            );
+            const target = Math.floor(maxStoreBytes * 0.95);
+            const resized = await resizeImageToFit(file, target);
+            bytes = resized.bytes;
+            label = `Image (${resized.filename})`;
+            onStatus(
+                `Resized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`,
+            );
+        } else {
+            bytes = new Uint8Array(await file.arrayBuffer());
+            onStatus("Uploading to Bulletin…");
+        }
+        const stored = await storeBytes({
+            bytes,
+            signer: activeAccount.signer,
+            signerAddress: activeAccount.address,
+            displayName: activeAccount.displayName,
+            label,
+        });
+        return stored.ipfsUrl;
     };
 
     const connectExtension = async () => {
@@ -203,6 +262,8 @@ export default function App() {
                             editable={isEditing}
                             onUpdate={(b) => updateBlock(block.id, () => b)}
                             onRemove={() => removeBlock(block.id)}
+                            onUploadImage={uploadImage}
+                            maxStoreBytes={maxStoreBytes}
                         />
                     ))}
                     {isEditing && content.blocks.length === 0 && (
@@ -530,13 +591,20 @@ function BlockView({
     editable,
     onUpdate,
     onRemove,
+    onUploadImage,
+    maxStoreBytes,
 }: {
     block: Block;
     accentColor: string;
     editable: boolean;
     onUpdate: (next: Block) => void;
     onRemove: () => void;
+    onUploadImage: (file: File, onStatus: (msg: string) => void) => Promise<string>;
+    maxStoreBytes: number | null;
 }) {
+    const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const uploading = uploadStatus !== null;
     return (
         <div className={`block ${editable ? "is-editing" : ""}`}>
             {editable && (
@@ -602,14 +670,59 @@ function BlockView({
                         <div className="site-image-placeholder">No image URL yet</div>
                     ) : null}
                     {editable && (
-                        <Editable
-                            tag="span"
-                            value={block.url}
-                            onChange={(url) => onUpdate({ ...block, url })}
-                            editable
-                            className="site-link-url"
-                            placeholder="https:// image URL"
-                        />
+                        <div className="image-controls">
+                            <label className="image-upload">
+                                <input
+                                    type="file"
+                                    accept="image/*"
+                                    disabled={uploading}
+                                    onChange={async (e) => {
+                                        const file = e.target.files?.[0];
+                                        e.target.value = "";
+                                        if (!file) return;
+                                        setUploadStatus("Reading file…");
+                                        setUploadError(null);
+                                        try {
+                                            const url = await onUploadImage(
+                                                file,
+                                                setUploadStatus,
+                                            );
+                                            onUpdate({
+                                                ...block,
+                                                url,
+                                                alt: block.alt || file.name,
+                                            });
+                                        } catch (cause) {
+                                            setUploadError(
+                                                cause instanceof Error
+                                                    ? cause.message
+                                                    : String(cause),
+                                            );
+                                        } finally {
+                                            setUploadStatus(null);
+                                        }
+                                    }}
+                                />
+                                <span>
+                                    {uploading
+                                        ? uploadStatus
+                                        : maxStoreBytes !== null && maxStoreBytes > 0
+                                          ? `Upload image (auto-resize → ≤${Math.floor(maxStoreBytes / 1024)} KB)`
+                                          : "Upload image"}
+                                </span>
+                            </label>
+                            <Editable
+                                tag="span"
+                                value={block.url}
+                                onChange={(url) => onUpdate({ ...block, url })}
+                                editable
+                                className="site-link-url"
+                                placeholder="https:// or upload above"
+                            />
+                            {uploadError && (
+                                <pre className="image-upload-error">{uploadError}</pre>
+                            )}
+                        </div>
                     )}
                 </>
             )}

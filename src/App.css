@@ -55,6 +55,34 @@ body {
     color: rgba(255,255,255,0.4);
     margin: 16px 0;
 }
+.image-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.image-upload {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--chrome-border);
+    border-radius: 999px;
+    color: var(--chrome-text);
+    font-size: 12px;
+    cursor: pointer;
+    align-self: flex-start;
+    transition: border-color 0.15s, background 0.15s;
+}
+.image-upload:hover { border-color: rgba(255,255,255,0.3); }
+.image-upload input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.image-upload-error {
+    margin: 0;
+    padding: 8px 10px;
+    background: rgba(248, 113, 113, 0.08);
+    border: 1px solid rgba(248, 113, 113, 0.3);
+    border-radius: 6px;
+    color: var(--danger);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 .site-divider { border: 0; border-top: 1px solid rgba(255,255,255,0.15); margin: 32px 0; }
 .site-tip {
     color: rgba(255,255,255,0.4);

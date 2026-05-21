@@ -37,20 +37,20 @@ export async function checkBulletinAuthorization(address: string): Promise<AuthC
     };
 }
 
-export async function storeHTML(params: {
-    html: string;
+export async function storeBytes(params: {
+    bytes: Uint8Array;
     signer: PolkadotSigner;
     signerAddress: string;
     displayName: string;
+    label?: string;
     onStatus?: (status: DeployStatus) => void;
 }): Promise<StoreHTMLResult> {
-    const { html, signer, signerAddress, displayName, onStatus } = params;
-    const bytes = new TextEncoder().encode(html);
+    const { bytes, signer, signerAddress, displayName, label = "Content", onStatus } = params;
 
-    if (bytes.length === 0) throw new Error("HTML is empty — nothing to deploy");
+    if (bytes.length === 0) throw new Error(`${label} is empty — nothing to store`);
     if (bytes.length > MAX_SIZE) {
         throw new Error(
-            `HTML is ${bytes.length.toLocaleString()} bytes — Bulletin max is ${MAX_SIZE.toLocaleString()} (~2 MiB)`,
+            `${label} is ${bytes.length.toLocaleString()} bytes — Bulletin max is ${MAX_SIZE.toLocaleString()} (~2 MiB)`,
         );
     }
 
@@ -63,7 +63,7 @@ export async function storeHTML(params: {
     }
     if (auth.bytes < BigInt(bytes.length)) {
         throw new Error(
-            `${displayName} is authorized for ${auth.bytes} bytes but content is ${bytes.length} bytes`,
+            `${displayName} is authorized for ${auth.bytes} bytes but ${label.toLowerCase()} is ${bytes.length} bytes`,
         );
     }
 
@@ -79,4 +79,21 @@ export async function storeHTML(params: {
         ipfsUrl: `${BULLETIN_GATEWAY}${cid}`,
         bytes: bytes.length,
     };
+}
+
+export async function storeHTML(params: {
+    html: string;
+    signer: PolkadotSigner;
+    signerAddress: string;
+    displayName: string;
+    onStatus?: (status: DeployStatus) => void;
+}): Promise<StoreHTMLResult> {
+    return storeBytes({
+        bytes: new TextEncoder().encode(params.html),
+        signer: params.signer,
+        signerAddress: params.signerAddress,
+        displayName: params.displayName,
+        label: "HTML",
+        onStatus: params.onStatus,
+    });
 }
