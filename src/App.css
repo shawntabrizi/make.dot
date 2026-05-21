@@ -473,6 +473,8 @@ body {
     border-top: 1px solid var(--chrome-border);
 }
 .result-note.success { color: var(--ok); }
+.result-note a { color: inherit; text-decoration: underline; }
+.result-note a:hover { text-decoration: none; }
 .result-note code {
     background: rgba(0,0,0,0.4);
     padding: 1px 6px;
