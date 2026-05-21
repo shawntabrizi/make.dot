@@ -24,6 +24,35 @@ import {
 type View = "edit" | "preview" | "deploy";
 type DeployResult = DeployPreview | DeploySuccess;
 
+const DEPLOY_STEPS = [
+    { id: "prepare", label: "Prepare" },
+    { id: "bulletin", label: "Store" },
+    { id: "account", label: "Account" },
+    { id: "name", label: "Name" },
+    { id: "commit", label: "Commit" },
+    { id: "wait", label: "Wait" },
+    { id: "register", label: "Register" },
+    { id: "link", label: "Link" },
+] as const;
+
+function stepForDeployStatus(message: string): number {
+    if (message.startsWith("Bulletin:")) return 1;
+    if (message.startsWith("DotNS: resolving owner")) return 2;
+    if (message.startsWith("DotNS: checking domain")) return 3;
+    if (message.startsWith("DotNS register: Waiting")) return 5;
+    if (
+        message.startsWith("DotNS register: Pricing") ||
+        message.startsWith("DotNS register: Signing registration") ||
+        message.startsWith("DotNS register: Domain registered")
+    ) {
+        return 6;
+    }
+    if (message.startsWith("DotNS register:")) return 4;
+    if (message.startsWith("DotNS resolver:")) return 7;
+    if (message.startsWith("DotNS step failed")) return 7;
+    return 0;
+}
+
 function makeBlockId(): string {
     return Math.random().toString(36).slice(2, 10);
 }
@@ -41,6 +70,7 @@ export default function App() {
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
+    const [deployStep, setDeployStep] = useState<number | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -103,11 +133,21 @@ export default function App() {
         setBusy(true);
         setResult(null);
         setDeployError(null);
-        setStatus(null);
+        setDeployStep(0);
+        setStatus("Preparing deploy…");
+        const updateDeployStatus = (message: string) => {
+            setStatus(message);
+            setDeployStep(stepForDeployStatus(message));
+        };
         try {
             const html = renderHtml(content);
             if (activeAccount?.source === "dev") {
-                const stored = await deployFull(html, domain || null, activeAccount, setStatus);
+                const stored = await deployFull(
+                    html,
+                    domain || null,
+                    activeAccount,
+                    updateDeployStatus,
+                );
                 setResult(stored);
             } else {
                 const preview = await previewDeploy(html, domain || null);
@@ -118,6 +158,7 @@ export default function App() {
         } finally {
             setBusy(false);
             setStatus(null);
+            setDeployStep(null);
         }
     };
 
@@ -301,7 +342,9 @@ export default function App() {
                         {busy ? "Deploying…" : "Deploy"}
                     </button>
 
-                    {busy && status && <div className="status">{status}</div>}
+                    {busy && status && deployStep !== null && (
+                        <DeployProgress step={deployStep} status={status} />
+                    )}
 
                     {result && (
                         <div className={`result result-${result.kind}`}>
@@ -391,6 +434,43 @@ export default function App() {
                 </div>
             </nav>
         </>
+    );
+}
+
+function DeployProgress({ step, status }: { step: number; status: string }) {
+    const currentStep = DEPLOY_STEPS[Math.min(step, DEPLOY_STEPS.length - 1)];
+    const stepNumber = Math.min(step + 1, DEPLOY_STEPS.length);
+
+    return (
+        <div className="deploy-progress" role="status" aria-live="polite">
+            <div className="progress-meta">
+                <span>{`Step ${stepNumber} of ${DEPLOY_STEPS.length}`}</span>
+                <span>{currentStep.label}</span>
+            </div>
+            <div
+                className="progress-bar"
+                role="progressbar"
+                aria-valuemin={1}
+                aria-valuemax={DEPLOY_STEPS.length}
+                aria-valuenow={stepNumber}
+                aria-valuetext={`${currentStep.label}: ${status}`}
+            >
+                {DEPLOY_STEPS.map((deployStep, index) => (
+                    <span
+                        key={deployStep.id}
+                        className={[
+                            "progress-segment",
+                            index < step ? "is-complete" : "",
+                            index === step ? "is-active" : "",
+                        ]
+                            .filter(Boolean)
+                            .join(" ")}
+                        aria-hidden="true"
+                    />
+                ))}
+            </div>
+            <div className="status">{status}</div>
+        </div>
     );
 }
 
