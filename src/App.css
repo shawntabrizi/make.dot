@@ -21,11 +21,11 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
-/* ── The live site (the deploy artifact's mirror, full-bleed) ───────────── */
+/* ── The live site (the deploy artifact's mirror) ───────────────────────── */
 
 .site {
     min-height: 100dvh;
-    padding: 80px 24px 120px;
+    padding: 80px 24px 140px;
     color: #f5f5f5;
     line-height: 1.5;
     transition: background 0.2s ease, color 0.2s ease;
@@ -86,7 +86,7 @@ body {
 
 .block-link { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px; }
 
-/* ── Inline-edit affordances (apply only in edit mode) ──────────────────── */
+/* ── Inline-edit affordances (apply only in edit view) ──────────────────── */
 
 .site.is-editing .editable {
     outline: 1px dashed transparent;
@@ -105,48 +105,13 @@ body {
     color: rgba(255,255,255,0.3);
 }
 
-/* ── Floating chrome (top-right + bottom-right corners) ─────────────────── */
+/* ── Top-right floating action bar (edit view only) ─────────────────────── */
 
 .float-top {
     position: fixed;
     top: 16px; right: 16px;
     z-index: 20;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 8px;
 }
-
-.float-bottom {
-    position: fixed;
-    bottom: 20px; right: 20px;
-    z-index: 20;
-}
-
-.pill {
-    height: 36px;
-    padding: 0 18px;
-    border-radius: 999px;
-    border: 1px solid var(--chrome-border);
-    background: var(--chrome-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    color: var(--chrome-text);
-    font: inherit;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-}
-.pill:hover:not(:disabled) { border-color: rgba(255,255,255,0.25); }
-.pill:disabled { opacity: 0.4; cursor: not-allowed; }
-.pill-toggle[aria-pressed="true"] { background: rgba(230, 0, 122, 0.15); border-color: rgba(230, 0, 122, 0.4); color: var(--accent); }
-.pill-primary { background: var(--accent); border-color: transparent; height: 44px; padding: 0 24px; font-size: 14px; box-shadow: 0 6px 24px rgba(230, 0, 122, 0.3); }
-.pill-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.pill-secondary { background: var(--chrome-surface); }
 
 .action-bar {
     display: flex;
@@ -219,7 +184,6 @@ body {
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .action-btn:hover { border-color: rgba(255,255,255,0.3); }
-.action-btn.is-active { background: rgba(230, 0, 122, 0.2); border-color: var(--accent); color: var(--accent); }
 
 .add-wrap { position: relative; }
 .add-menu {
@@ -248,26 +212,89 @@ body {
 }
 .add-menu button:hover { background: rgba(255,255,255,0.05); }
 
-/* ── Settings sheet (bottom-right desktop, full-width mobile) ───────────── */
+/* ── Bottom centered nav pill (3 tabs) ──────────────────────────────────── */
 
-.settings-sheet {
+.bottom-nav {
     position: fixed;
-    bottom: 76px; right: 20px;
+    left: 0; right: 0;
+    bottom: calc(12px + env(safe-area-inset-bottom));
     z-index: 25;
-    width: 340px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.bottom-nav-pill {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px;
+    background: var(--chrome-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--chrome-border);
+    border-radius: 999px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.nav-tab {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 68px;
+    padding: 6px 14px;
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    color: var(--chrome-text2);
+    font: inherit;
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.nav-tab:hover { color: var(--chrome-text); }
+.nav-tab.is-active {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--chrome-text);
+}
+.nav-tab svg { display: block; }
+.nav-tab-label { line-height: 1; }
+
+/* ── Deploy panel (visible in deploy view) ──────────────────────────────── */
+
+.deploy-panel {
+    position: fixed;
+    left: 50%;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    width: min(420px, calc(100% - 32px));
+    max-height: calc(100dvh - 160px);
+    overflow-y: auto;
     background: var(--chrome-surface);
     border: 1px solid var(--chrome-border);
     border-radius: 16px;
-    padding: 16px;
+    padding: 18px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+    gap: 14px;
+    box-shadow: 0 16px 40px rgba(0,0,0,0.5);
+    z-index: 24;
 }
-.settings-row { display: flex; flex-direction: column; gap: 6px; }
+
+.deploy-title { font-size: 16px; font-weight: 600; margin: 0; }
+.deploy-field { display: flex; flex-direction: column; gap: 8px; }
+.field-label {
+    color: var(--chrome-text2);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
 
 .field { display: flex; flex-direction: column; gap: 6px; }
-.field-label { color: var(--chrome-text2); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
 .field input[type="text"] {
     width: 100%;
     background: rgba(0,0,0,0.4);
@@ -279,6 +306,7 @@ body {
     font-size: 14px;
 }
 .field input[type="text"]:focus { outline: 0; border-color: var(--accent); }
+.field input[type="text"]:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .account-chip {
     display: inline-flex;
@@ -305,60 +333,87 @@ body {
     color: var(--chrome-text);
 }
 .checkbox input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.checkbox input:disabled { cursor: not-allowed; }
 .checkbox-hint { color: var(--chrome-text2); opacity: 0.7; }
+
+.url-preview {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    color: var(--chrome-text);
+    background: rgba(0,0,0,0.3);
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--chrome-border);
+    word-break: break-all;
+}
 
 .hint { color: var(--chrome-text2); font-size: 12px; line-height: 1.5; }
 .hint strong { color: var(--chrome-text); }
 .hint.subtle { opacity: 0.7; }
 
-/* ── Deploy overlay (modal during deploy + on result/error) ─────────────── */
-
-.overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 40;
-    background: rgba(0,0,0,0.6);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    display: flex;
+.pill {
+    height: 36px;
+    padding: 0 18px;
+    border-radius: 999px;
+    border: 1px solid var(--chrome-border);
+    background: var(--chrome-bg);
+    color: var(--chrome-text);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 20px;
+    align-self: flex-start;
 }
-.overlay-card {
-    background: var(--chrome-surface);
-    border: 1px solid var(--chrome-border);
-    border-radius: 16px;
-    padding: 24px;
-    max-width: 520px;
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+.pill:hover:not(:disabled) { border-color: rgba(255,255,255,0.25); }
+.pill:disabled { opacity: 0.4; cursor: not-allowed; }
+.pill-primary {
+    background: var(--accent);
+    border-color: transparent;
+    height: 44px;
+    padding: 0 24px;
+    font-size: 14px;
+    box-shadow: 0 6px 24px rgba(230, 0, 122, 0.3);
 }
-.overlay-card h3 { font-size: 18px; font-weight: 600; margin: 0; }
+.pill-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.pill-secondary { background: var(--chrome-surface); }
+.pill-wide { width: 100%; align-self: stretch; }
 
 .status {
     color: var(--chrome-text2);
-    font-size: 13px;
-    padding: 10px 14px;
+    font-size: 12px;
+    padding: 10px 12px;
     background: rgba(0,0,0,0.3);
     border-radius: 8px;
+    line-height: 1.4;
 }
 
-.row-line { display: flex; align-items: baseline; gap: 12px; font-size: 13px; }
+.result {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    background: rgba(0,0,0,0.3);
+    border-radius: 10px;
+    border: 1px solid var(--chrome-border);
+}
+.result-stored { border-color: rgba(110, 231, 183, 0.3); }
+
+.row-line { display: flex; align-items: baseline; gap: 12px; font-size: 12px; }
 .row-label {
     color: var(--chrome-text2);
-    font-size: 11px;
+    font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    flex: 0 0 96px;
+    flex: 0 0 64px;
 }
 .row-value { color: var(--chrome-text); word-break: break-all; }
 .row-value a { color: var(--accent); text-decoration: none; }
 .row-value a:hover { text-decoration: underline; }
-.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
 
 .result-note {
     color: var(--chrome-text2); font-size: 12px; line-height: 1.5;
@@ -386,18 +441,15 @@ body {
     word-break: break-word;
 }
 
-/* ── Mobile layout: settings as bottom sheet, smaller padding ───────────── */
+/* ── Mobile tweaks ──────────────────────────────────────────────────────── */
 
 @media (max-width: 600px) {
-    .site { padding: 64px 16px 100px; }
+    .site { padding: 64px 16px 160px; }
     .float-top { top: 12px; right: 12px; }
-    .float-bottom { bottom: 16px; right: 16px; }
     .action-bar { padding: 5px; gap: 6px; }
-    .settings-sheet {
-        bottom: 0; right: 0; left: 0;
-        width: auto;
-        border-radius: 16px 16px 0 0;
-        border-bottom: 0;
+    .action-select { display: none; }
+    .deploy-panel {
+        width: calc(100% - 16px);
+        bottom: calc(80px + env(safe-area-inset-bottom));
     }
-    .action-select { display: none; } /* hide font picker on mobile (still in settings if needed later) */
 }

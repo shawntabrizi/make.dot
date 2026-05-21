@@ -21,6 +21,7 @@ import {
     tryHostAccount,
 } from "./account.ts";
 
+type View = "edit" | "preview" | "deploy";
 type DeployResult = DeployPreview | DeploySuccess;
 
 function makeBlockId(): string {
@@ -36,14 +37,13 @@ const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
 
 export default function App() {
     const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
-    const [editMode, setEditMode] = useState(true); // Land in edit mode so the affordances are immediately discoverable.
+    const [view, setView] = useState<View>("edit");
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
     const [status, setStatus] = useState<string | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
-    const [showSettings, setShowSettings] = useState(false);
 
     // Signer state — Bob default, owned-account opt-in.
     const [useOwnedAccount, setUseOwnedAccount] = useState(false);
@@ -73,7 +73,6 @@ export default function App() {
 
     const update = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) =>
         setContent((prev) => ({ ...prev, [key]: value }));
-
     const updateBlock = (id: string, patcher: (b: Block) => Block) =>
         setContent((prev) => ({
             ...prev,
@@ -122,12 +121,11 @@ export default function App() {
         }
     };
 
+    const isEditing = view === "edit";
     const canDeploy = !busy && activeAccount !== null;
     const showOwnedHint =
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
-    // Site styles — applied to the live editing surface AND honoured by the
-    // deploy serializer (template.ts::renderHtml). Single source of truth.
     const siteStyle = {
         background: content.background,
         fontFamily: content.fontFamily,
@@ -135,13 +133,13 @@ export default function App() {
 
     return (
         <>
-            <main className={`site ${editMode ? "is-editing" : ""}`} style={siteStyle}>
+            <main className={`site ${isEditing ? "is-editing" : ""}`} style={siteStyle}>
                 <article className="site-inner">
                     <Editable
                         tag="h1"
                         value={content.header}
                         onChange={(v) => update("header", v)}
-                        editable={editMode}
+                        editable={isEditing}
                         className="site-header"
                         style={{ color: content.accentColor }}
                         ariaLabel="Page header"
@@ -151,7 +149,7 @@ export default function App() {
                         tag="p"
                         value={content.subheader}
                         onChange={(v) => update("subheader", v)}
-                        editable={editMode}
+                        editable={isEditing}
                         className="site-subheader"
                         ariaLabel="Page subheader"
                         placeholder="Subheader text"
@@ -161,12 +159,12 @@ export default function App() {
                             key={block.id}
                             block={block}
                             accentColor={content.accentColor}
-                            editable={editMode}
+                            editable={isEditing}
                             onUpdate={(b) => updateBlock(block.id, () => b)}
                             onRemove={() => removeBlock(block.id)}
                         />
                     ))}
-                    {editMode && content.blocks.length === 0 && (
+                    {isEditing && content.blocks.length === 0 && (
                         <p className="site-tip">
                             Tip: click any text to edit. Use the + button in the corner to
                             add sections.
@@ -175,19 +173,9 @@ export default function App() {
                 </article>
             </main>
 
-            {/* Top-right floating: Edit ↔ Done toggle + action bar (edit only) */}
-            <div className="float-top">
-                <button
-                    className="pill pill-toggle"
-                    onClick={() => {
-                        setEditMode((v) => !v);
-                        setAddMenuOpen(false);
-                    }}
-                    aria-pressed={editMode}
-                >
-                    {editMode ? "Done" : "Edit"}
-                </button>
-                {editMode && (
+            {/* Top-right action bar — visible only in edit view. */}
+            {isEditing && (
+                <div className="float-top">
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
                         <ColorSwatch
                             label="Accent"
@@ -232,33 +220,60 @@ export default function App() {
                                 </div>
                             )}
                         </div>
-                        <button
-                            className={`action-btn ${showSettings ? "is-active" : ""}`}
-                            onClick={() => setShowSettings((v) => !v)}
-                            aria-pressed={showSettings}
-                            title="Settings"
-                        >
-                            ⚙
-                        </button>
                     </div>
-                )}
-            </div>
+                </div>
+            )}
 
-            {/* Bottom-right floating: Deploy. Visible in both modes. */}
-            <div className="float-bottom">
-                <button
-                    className="pill pill-primary"
-                    onClick={deploy}
-                    disabled={!canDeploy}
-                >
-                    {busy ? "Deploying…" : "Deploy"}
-                </button>
-            </div>
+            {/* Deploy panel — visible only in deploy view. */}
+            {view === "deploy" && (
+                <div className="deploy-panel" role="region" aria-label="Deploy">
+                    <h2 className="deploy-title">Deploy your site</h2>
 
-            {/* Settings sheet — slides up bottom-right (desktop) / full-width (mobile) */}
-            {showSettings && (
-                <div className="settings-sheet" role="dialog" aria-label="Settings">
-                    <div className="settings-row">
+                    <div className="deploy-field">
+                        <span className="field-label">Account</span>
+                        <span className="account-chip">
+                            <span
+                                className={`source-dot source-${activeAccount?.source ?? "none"}`}
+                            />
+                            {activeAccount
+                                ? `${activeAccount.displayName} (${activeAccount.source})`
+                                : resolvingOwned
+                                  ? "connecting…"
+                                  : "no signer"}
+                        </span>
+                        <label className="checkbox">
+                            <input
+                                type="checkbox"
+                                checked={useOwnedAccount}
+                                onChange={(e) => setUseOwnedAccount(e.target.checked)}
+                                disabled={busy}
+                            />
+                            <span>
+                                Sign with my own account
+                                <span className="checkbox-hint"> — default is //Bob</span>
+                            </span>
+                        </label>
+                        {useOwnedAccount && !hostAccount && !extensionAccount && (
+                            <button
+                                className="pill pill-secondary"
+                                onClick={connectExtension}
+                                disabled={!hasInjectedExtension() || resolvingOwned || busy}
+                            >
+                                Connect browser wallet
+                            </button>
+                        )}
+                        {showOwnedHint && (
+                            <p className="hint">
+                                No host signer detected. Open in{" "}
+                                <strong>Polkadot Desktop</strong> or{" "}
+                                <strong>Polkadot Mobile</strong>, connect a browser wallet,
+                                or untick to deploy as //Bob.
+                            </p>
+                        )}
+                        {ownedError && <p className="hint subtle">{ownedError}</p>}
+                    </div>
+
+                    <div className="deploy-field">
                         <label className="field">
                             <span className="field-label">.dot name</span>
                             <input
@@ -266,70 +281,130 @@ export default function App() {
                                 placeholder="auto-generated if blank"
                                 value={domain}
                                 onChange={(e) => setDomain(e.target.value.trim())}
+                                disabled={busy}
                             />
                         </label>
                     </div>
-                    <div className="settings-row">
-                        <span className="account-chip">
-                            <span className={`source-dot source-${activeAccount?.source ?? "none"}`} />
-                            {activeAccount
-                                ? `${activeAccount.displayName} (${activeAccount.source})`
-                                : resolvingOwned
-                                  ? "connecting…"
-                                  : "no signer"}
+
+                    <div className="deploy-field">
+                        <span className="field-label">URL</span>
+                        <span className="url-preview">
+                            {`https://${domain || "<auto>"}.dot.li`}
                         </span>
                     </div>
-                    <div className="settings-row">
-                        <label className="checkbox">
-                            <input
-                                type="checkbox"
-                                checked={useOwnedAccount}
-                                onChange={(e) => setUseOwnedAccount(e.target.checked)}
-                            />
-                            <span>
-                                Sign with my own account
-                                <span className="checkbox-hint"> — default is //Bob</span>
-                            </span>
-                        </label>
-                    </div>
-                    {useOwnedAccount && !hostAccount && !extensionAccount && (
-                        <div className="settings-row">
-                            <button
-                                className="pill pill-secondary"
-                                onClick={connectExtension}
-                                disabled={!hasInjectedExtension() || resolvingOwned}
-                            >
-                                Connect browser wallet
-                            </button>
+
+                    <button
+                        className="pill pill-primary pill-wide"
+                        onClick={deploy}
+                        disabled={!canDeploy}
+                    >
+                        {busy ? "Deploying…" : "Deploy"}
+                    </button>
+
+                    {busy && status && <div className="status">{status}</div>}
+
+                    {result && (
+                        <div className={`result result-${result.kind}`}>
+                            <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
+                            <Row label="CID" mono>
+                                {result.cid}
+                            </Row>
+                            <Row label="gateway">
+                                <a href={result.gatewayUrl} target="_blank" rel="noopener">
+                                    {result.gatewayUrl}
+                                </a>
+                            </Row>
+                            {result.kind === "stored" && (
+                                <Row label="block">
+                                    #{result.blockNumber.toLocaleString()}
+                                </Row>
+                            )}
+                            {result.kind === "stored" && result.dotMapped ? (
+                                <p className="result-note success">
+                                    Live on{" "}
+                                    <a href={result.url} target="_blank" rel="noopener">
+                                        {result.url}
+                                    </a>
+                                    . Resolution may take a few seconds to propagate.
+                                </p>
+                            ) : result.kind === "stored" ? (
+                                <p className="result-note">
+                                    Stored on Bulletin ✓. The <code>.dot.li</code> mapping
+                                    step failed — see the status above for details. Bytes
+                                    still retrievable via the gateway link.
+                                </p>
+                            ) : (
+                                <p className="result-note">
+                                    Preview only — chain submission for{" "}
+                                    {activeAccount?.source ?? "this signer"} isn't wired.
+                                    Untick "Sign with my own account" to deploy as //Bob.
+                                </p>
+                            )}
                         </div>
                     )}
-                    {showOwnedHint && (
-                        <p className="hint">
-                            No host signer detected. Open this app in{" "}
-                            <strong>Polkadot Desktop</strong> or{" "}
-                            <strong>Polkadot Mobile</strong>, click{" "}
-                            <strong>Connect browser wallet</strong>, or untick the box to
-                            deploy as //Bob.
-                        </p>
+                    {deployError && (
+                        <pre className="error error-block">{deployError}</pre>
                     )}
-                    {ownedError && <p className="hint subtle">{ownedError}</p>}
                 </div>
             )}
 
-            {(busy || result || deployError) && (
-                <DeployOverlay
-                    busy={busy}
-                    status={status}
-                    result={result}
-                    error={deployError}
-                    account={activeAccount}
-                    onDismiss={() => {
-                        setResult(null);
-                        setDeployError(null);
-                    }}
-                />
-            )}
+            {/* Bottom centered nav — 3 tabs, always visible. */}
+            <nav className="bottom-nav" aria-label="View">
+                <div className="bottom-nav-pill">
+                    <NavTab
+                        active={view === "edit"}
+                        onClick={() => {
+                            setView("edit");
+                            setAddMenuOpen(false);
+                        }}
+                        icon={<PencilIcon />}
+                        label="Edit"
+                    />
+                    <NavTab
+                        active={view === "preview"}
+                        onClick={() => {
+                            setView("preview");
+                            setAddMenuOpen(false);
+                        }}
+                        icon={<EyeIcon />}
+                        label="Preview"
+                    />
+                    <NavTab
+                        active={view === "deploy"}
+                        onClick={() => {
+                            setView("deploy");
+                            setAddMenuOpen(false);
+                        }}
+                        icon={<RocketIcon />}
+                        label="Deploy"
+                    />
+                </div>
+            </nav>
         </>
+    );
+}
+
+function NavTab({
+    active,
+    onClick,
+    icon,
+    label,
+}: {
+    active: boolean;
+    onClick: () => void;
+    icon: React.ReactNode;
+    label: string;
+}) {
+    return (
+        <button
+            type="button"
+            className={`nav-tab ${active ? "is-active" : ""}`}
+            onClick={onClick}
+            aria-pressed={active}
+        >
+            {icon}
+            <span className="nav-tab-label">{label}</span>
+        </button>
     );
 }
 
@@ -453,90 +528,6 @@ function BlockView({
     );
 }
 
-function DeployOverlay({
-    busy,
-    status,
-    result,
-    error,
-    account,
-    onDismiss,
-}: {
-    busy: boolean;
-    status: string | null;
-    result: DeployResult | null;
-    error: string | null;
-    account: ActiveAccount | null;
-    onDismiss: () => void;
-}) {
-    return (
-        <div className="overlay" role="dialog" aria-live="polite">
-            <div className="overlay-card">
-                {busy && (
-                    <>
-                        <h3>Deploying…</h3>
-                        <p className="status">{status ?? "Starting up"}</p>
-                    </>
-                )}
-                {!busy && result && (
-                    <>
-                        <h3>{result.kind === "stored" ? "Deployed" : "Preview"}</h3>
-                        <Row label="bytes">{result.bytes.toLocaleString()} B</Row>
-                        <Row label="CID" mono>
-                            {result.cid}
-                        </Row>
-                        <Row label="gateway">
-                            <a href={result.gatewayUrl} target="_blank" rel="noopener">
-                                {result.gatewayUrl}
-                            </a>
-                        </Row>
-                        {result.kind === "stored" && (
-                            <Row label="block">#{result.blockNumber.toLocaleString()}</Row>
-                        )}
-                        <Row label="signed by">
-                            {account
-                                ? `${account.displayName} (${account.source})`
-                                : "— no signer —"}
-                        </Row>
-                        {result.kind === "stored" && result.dotMapped ? (
-                            <p className="result-note success">
-                                Live on{" "}
-                                <a href={result.url} target="_blank" rel="noopener">
-                                    {result.url}
-                                </a>
-                                . Resolution may take a few seconds to propagate.
-                            </p>
-                        ) : result.kind === "stored" ? (
-                            <p className="result-note">
-                                Stored on Bulletin ✓. The <code>.dot.li</code> mapping
-                                step failed — see status banner for details. Bytes still
-                                retrievable via the gateway link above.
-                            </p>
-                        ) : (
-                            <p className="result-note">
-                                Preview only — chain submission for{" "}
-                                {account?.source ?? "this signer"} isn't wired. Untick
-                                "Sign with my own account" to deploy as //Bob.
-                            </p>
-                        )}
-                        <button className="pill pill-secondary" onClick={onDismiss}>
-                            Close
-                        </button>
-                    </>
-                )}
-                {!busy && error && (
-                    <>
-                        <h3>Deploy failed</h3>
-                        <pre className="error error-block">{error}</pre>
-                        <button className="pill pill-secondary" onClick={onDismiss}>
-                            Close
-                        </button>
-                    </>
-                )}
-            </div>
-        </div>
-    );
-}
-
 function Row({
     label,
     children,
@@ -551,5 +542,33 @@ function Row({
             <span className="row-label">{label}</span>
             <span className={`row-value${mono ? " mono" : ""}`}>{children}</span>
         </div>
+    );
+}
+
+// Inline SVG icons. Lightweight, no dep.
+function PencilIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 20h9" />
+            <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4z" />
+        </svg>
+    );
+}
+function EyeIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            <circle cx="12" cy="12" r="3" />
+        </svg>
+    );
+}
+function RocketIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z" />
+            <path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z" />
+            <path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0" />
+            <path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5" />
+        </svg>
     );
 }

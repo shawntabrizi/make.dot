@@ -1,17 +1,20 @@
 // Inline contenteditable primitive. State drives the deploy artifact; the DOM
-// is the editing surface; the two are kept in sync via refs without React
-// fighting the user's cursor on every keystroke.
+// owns the cursor; the two are kept in sync via a layout-effect.
 //
-// Key design: we DON'T pass `value` as React children. The DOM owns its own
-// text until either (a) the parent rerenders us with a different `value` that
-// originated externally (e.g. reset), or (b) the user types. The `lastSeen`
-// ref tracks the value we last echoed in/out, so external resets sync but
-// echoes from our own onInput don't trigger a redundant DOM write that would
-// nuke the caret position.
+// Design notes:
+//   - We NEVER pass `value` as React children. React reconciles children on
+//     every render — even with `suppressContentEditableWarning` — and switching
+//     between modes (children-rendered preview vs no-children contenteditable)
+//     was clearing the DOM text on the mode flip.
+//   - Instead, useLayoutEffect imperatively sets `textContent` whenever value
+//     or mode changes. The `textContent !== value` guard skips writes when the
+//     DOM already matches, which preserves the caret during user typing.
+//   - useLayoutEffect runs before the browser paints, so there's no flash of
+//     empty content when transitioning between modes.
 
 import {
     createElement,
-    useEffect,
+    useLayoutEffect,
     useRef,
     type CSSProperties,
     type FormEvent,
@@ -41,56 +44,26 @@ export function Editable({
     ariaLabel,
 }: EditableProps) {
     const ref = useRef<HTMLElement>(null);
-    const lastSeen = useRef(value);
 
-    // First mount: populate the DOM with the initial value.
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (ref.current && ref.current.textContent !== value) {
             ref.current.textContent = value;
         }
-        lastSeen.current = value;
-        // run once on mount only — subsequent external syncs handled below
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    // Sync when `value` changes externally (i.e. not from our own onInput).
-    useEffect(() => {
-        if (value === lastSeen.current) return;
-        if (ref.current && ref.current.textContent !== value) {
-            ref.current.textContent = value;
-        }
-        lastSeen.current = value;
-    }, [value]);
+    }, [value, editable]);
 
     const onInput = (e: FormEvent<HTMLElement>) => {
-        const next = e.currentTarget.textContent ?? "";
-        lastSeen.current = next;
-        onChange(next);
+        onChange(e.currentTarget.textContent ?? "");
     };
-
-    // Preview render: no editing affordances at all. Same DOM the deploy
-    // artifact uses — what you see is exactly what gets shipped.
-    if (!editable) {
-        return createElement(
-            tag,
-            {
-                ref,
-                className,
-                style,
-            },
-            value,
-        );
-    }
 
     return createElement(tag, {
         ref,
-        contentEditable: "plaintext-only",
-        suppressContentEditableWarning: true,
-        onInput,
-        className: ["editable", className].filter(Boolean).join(" "),
+        contentEditable: editable ? "plaintext-only" : undefined,
+        suppressContentEditableWarning: editable || undefined,
+        onInput: editable ? onInput : undefined,
+        className: editable ? `editable ${className ?? ""}`.trim() : className,
         style,
+        spellCheck: editable || undefined,
+        "data-placeholder": editable ? placeholder : undefined,
         "aria-label": ariaLabel,
-        "data-placeholder": placeholder,
-        spellCheck: true,
     });
 }
