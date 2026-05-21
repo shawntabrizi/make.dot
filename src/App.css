@@ -105,11 +105,13 @@ body {
     color: rgba(255,255,255,0.3);
 }
 
-/* ── Top-right floating action bar (edit view only) ─────────────────────── */
+/* ── Floating action bar (edit view only) — sits above the bottom nav pill ─ */
 
-.float-top {
+.float-bottom {
     position: fixed;
-    top: 16px; right: 16px;
+    left: 50%;
+    bottom: calc(76px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
     z-index: 20;
 }
 
@@ -188,8 +190,8 @@ body {
 .add-wrap { position: relative; }
 .add-menu {
     position: absolute;
-    top: 100%; right: 0;
-    margin-top: 8px;
+    bottom: 100%; right: 0;
+    margin-bottom: 8px;
     min-width: 140px;
     background: var(--chrome-surface);
     border: 1px solid var(--chrome-border);
@@ -499,7 +501,7 @@ body {
 
 @media (max-width: 600px) {
     .site { padding: 64px 16px 160px; }
-    .float-top { top: 12px; right: 12px; }
+    .float-bottom { bottom: calc(72px + env(safe-area-inset-bottom)); }
     .action-bar { padding: 5px; gap: 6px; }
     .action-select { display: none; }
     .deploy-panel {

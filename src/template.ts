@@ -19,8 +19,8 @@ export interface SiteContent {
 }
 
 export const DEFAULT_CONTENT: SiteContent = {
-    header: "Shawn Tabrizi says Hello World",
-    subheader: "Write something here",
+    header: "Hello, world",
+    subheader: "This is your page. Click anything to make it yours.",
     accentColor: "#e6007a",
     background: "#0b0d12",
     fontFamily: "system-ui",

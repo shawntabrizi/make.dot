@@ -184,7 +184,7 @@ export default function App() {
                         className="site-header"
                         style={{ color: content.accentColor }}
                         ariaLabel="Page header"
-                        placeholder="Your big heading"
+                        placeholder="Your page title"
                     />
                     <Editable
                         tag="p"
@@ -193,7 +193,7 @@ export default function App() {
                         editable={isEditing}
                         className="site-subheader"
                         ariaLabel="Page subheader"
-                        placeholder="Subheader text"
+                        placeholder="A short line about you or this page"
                     />
                     {content.blocks.map((block) => (
                         <BlockView
@@ -207,16 +207,16 @@ export default function App() {
                     ))}
                     {isEditing && content.blocks.length === 0 && (
                         <p className="site-tip">
-                            Tip: click any text to edit. Use the + button in the corner to
-                            add sections.
+                            Click any text to edit. Use the + button below to add
+                            paragraphs, links, or images — make it your own.
                         </p>
                     )}
                 </article>
             </main>
 
-            {/* Top-right action bar — visible only in edit view. */}
+            {/* Floating action bar — visible only in edit view; sits above the bottom nav pill. */}
             {isEditing && (
-                <div className="float-top">
+                <div className="float-bottom">
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
                         <ColorSwatch
                             label="Accent"
