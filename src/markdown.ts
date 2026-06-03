@@ -14,6 +14,12 @@ import {
     type SiteContent,
 } from "./template.ts";
 
+// Blocks render text literally (escapeHtml in template.ts), but markdown
+// passes raw HTML through live. Backslash-escape `<` (HTML tags) and `&`
+// (entity references) so converted text keeps meaning what it meant in
+// blocks mode; backslash escapes stay readable in the markdown editor.
+const escapeMarkdownText = (s: string): string => s.replace(/[<&]/g, (c) => `\\${c}`);
+
 // Downgrade of the block model. Content converts exactly, but markdown can't
 // express image sizing or pill-button styling, so those blocks become a plain
 // image and link.
@@ -22,16 +28,16 @@ export function blocksToMarkdown(content: SiteContent): string {
     for (const b of content.blocks) {
         switch (b.type) {
             case "heading":
-                parts.push(`# ${b.text}`);
+                parts.push(`# ${escapeMarkdownText(b.text)}`);
                 break;
             case "paragraph":
-                parts.push(b.text);
+                parts.push(escapeMarkdownText(b.text));
                 break;
             case "link":
-                parts.push(`[${b.label}](${b.url})`);
+                parts.push(`[${escapeMarkdownText(b.label)}](${b.url})`);
                 break;
             case "image":
-                parts.push(`![${b.alt}](${b.url})`);
+                parts.push(`![${escapeMarkdownText(b.alt)}](${b.url})`);
                 break;
             case "divider":
                 parts.push("---");
