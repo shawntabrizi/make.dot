@@ -473,6 +473,33 @@ export default function App() {
         return stored.ipfsUrl;
     };
 
+    // Upload state lives HERE, keyed by block id — not in the bottom sheet.
+    // Uploads outlive the sheet (close/reopen mid-upload keeps progress
+    // visible) and completion patches the CURRENT block, so edits made while
+    // uploading aren't reverted by a stale copy.
+    const [uploads, setUploads] = useState<Record<string, string>>({});
+    const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+    const startImageUpload = async (blockId: string, file: File) => {
+        if (uploads[blockId]) return; // one upload per block at a time
+        setUploadErrors(({ [blockId]: _drop, ...rest }) => rest);
+        setUploads((prev) => ({ ...prev, [blockId]: "Reading file…" }));
+        try {
+            const url = await uploadImage(file, (msg) =>
+                setUploads((prev) => ({ ...prev, [blockId]: msg })),
+            );
+            updateBlock(blockId, (b) =>
+                b.type === "image" ? { ...b, url, alt: b.alt || file.name } : b,
+            );
+        } catch (cause) {
+            setUploadErrors((prev) => ({
+                ...prev,
+                [blockId]: cause instanceof Error ? cause.message : String(cause),
+            }));
+        } finally {
+            setUploads(({ [blockId]: _drop, ...rest }) => rest);
+        }
+    };
+
     const connectExtension = async () => {
         setOwnedError(null);
         try {
@@ -619,6 +646,7 @@ export default function App() {
                             onUpdate={(b) => updateBlock(block.id, () => b)}
                             onRemove={() => removeBlock(block.id)}
                             onEdit={() => setEditingBlockId(block.id)}
+                            uploadStatus={uploads[block.id] ?? null}
                         />
                     ))}
                     {isEditing && content.blocks.length === 0 && (
@@ -902,7 +930,9 @@ export default function App() {
                         setEditingBlockId(null);
                     }}
                     onClose={() => setEditingBlockId(null)}
-                    onUploadImage={uploadImage}
+                    onUpload={(file) => startImageUpload(editingBlock.id, file)}
+                    uploadStatus={uploads[editingBlock.id] ?? null}
+                    uploadError={uploadErrors[editingBlock.id] ?? null}
                     maxStoreBytes={Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES)}
                 />
             )}
@@ -1340,6 +1370,7 @@ function BlockView({
     onUpdate,
     onRemove,
     onEdit,
+    uploadStatus,
 }: {
     block: Block;
     accentColor: string;
@@ -1347,6 +1378,7 @@ function BlockView({
     onUpdate: (next: Block) => void;
     onRemove: () => void;
     onEdit: () => void;
+    uploadStatus?: string | null;
 }) {
     const linkStyle =
         block.type === "link" && block.variant === "pill"
@@ -1443,7 +1475,7 @@ function BlockView({
                         tabIndex={0}
                         onKeyDown={(e) => e.key === "Enter" && onEdit()}
                     >
-                        No image yet — tap to edit
+                        {uploadStatus ?? "No image yet — tap to edit"}
                     </div>
                 ) : null)}
             {block.type === "divider" && <hr className="site-divider" />}
@@ -1459,36 +1491,27 @@ function BlockEditSheet({
     onUpdate,
     onDelete,
     onClose,
-    onUploadImage,
+    onUpload,
+    uploadStatus,
+    uploadError,
     maxStoreBytes,
 }: {
     block: Block;
     onUpdate: (next: Block) => void;
     onDelete: () => void;
     onClose: () => void;
-    onUploadImage: (file: File, onStatus: (msg: string) => void) => Promise<string>;
+    /** Fire-and-forget: upload state is owned by App (keyed by block id), so
+     * it survives this sheet closing and reopening mid-upload. */
+    onUpload: (file: File) => void;
+    uploadStatus: string | null;
+    uploadError: string | null;
     maxStoreBytes: number;
 }) {
-    const [uploadStatus, setUploadStatus] = useState<string | null>(null);
-    const [uploadError, setUploadError] = useState<string | null>(null);
     // URL entry is the power-user path — hidden behind a toggle by default.
     const [showUrlField, setShowUrlField] = useState(false);
     const uploading = uploadStatus !== null;
     const hasImage =
         block.type === "image" && !!block.url && block.url !== "https://";
-    const handleFile = async (file: File) => {
-        if (block.type !== "image") return;
-        setUploadStatus("Reading file…");
-        setUploadError(null);
-        try {
-            const url = await onUploadImage(file, setUploadStatus);
-            onUpdate({ ...block, url, alt: block.alt || file.name });
-        } catch (cause) {
-            setUploadError(cause instanceof Error ? cause.message : String(cause));
-        } finally {
-            setUploadStatus(null);
-        }
-    };
     const kind =
         block.type === "link"
             ? block.variant === "pill"
@@ -1540,10 +1563,10 @@ function BlockEditSheet({
                                 type="file"
                                 accept="image/*"
                                 disabled={uploading}
-                                onChange={async (e) => {
+                                onChange={(e) => {
                                     const file = e.target.files?.[0];
                                     e.target.value = "";
-                                    if (file) await handleFile(file);
+                                    if (file) onUpload(file);
                                 }}
                             />
                             {uploading && uploadStatus ? (
