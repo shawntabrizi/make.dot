@@ -382,12 +382,39 @@ export default function App() {
     const backToSimple = () => {
         if (
             !window.confirm(
-                "Back to the simple editor?\n\nThis restores your last block-editor state. Your Markdown/HTML edits will be discarded.",
+                "Back to the simple editor?\n\nThis restores your last simple editor state. Your Markdown/HTML edits will be discarded.",
             )
         )
             return;
         setMode("blocks");
         setOpenMenu(null);
+    };
+    // Upward hop html → markdown: restore the last markdown state, or derive a
+    // fresh one from the block content if markdown was never visited.
+    const backToMarkdown = () => {
+        if (
+            !window.confirm(
+                "Back to Markdown?\n\nThis restores your last Markdown state. Your HTML edits will be discarded.",
+            )
+        )
+            return;
+        if (!markdownText) setMarkdownText(blocksToMarkdown(content));
+        setMode("markdown");
+        setOpenMenu(null);
+    };
+    // The Mode menu always lists all three modes; route the transition.
+    const switchMode = (target: EditorMode) => {
+        if (target === mode) {
+            setOpenMenu(null);
+            return;
+        }
+        if (target === "blocks") backToSimple();
+        else if (target === "markdown") {
+            if (mode === "blocks") convertToMarkdown();
+            else backToMarkdown();
+        } else {
+            convertToHtml();
+        }
     };
 
     const uploadImage = async (
@@ -860,9 +887,7 @@ export default function App() {
                             mode={mode}
                             open={openMenu === "mode"}
                             onToggle={() => toggleMenu("mode")}
-                            onMarkdown={convertToMarkdown}
-                            onHtml={convertToHtml}
-                            onSimple={backToSimple}
+                            onSelect={switchMode}
                         />
                     </div>
                     <button
@@ -1128,22 +1153,50 @@ function NavTab({
     );
 }
 
-// The eject ladder's UI: downward conversions (exact) plus the revert back to
-// the simple editor. Options depend on where you are on the ladder.
+// The eject ladder's UI: all three modes are always listed with the current
+// one marked. Descriptions signal direction — downward hops are exact
+// conversions, upward hops revert and discard — and the confirm dialog
+// remains the consent step for any switch that loses edits.
+const MODE_NAMES: Record<EditorMode, string> = {
+    blocks: "Simple",
+    markdown: "Markdown",
+    html: "HTML",
+};
+
+function modeDescription(target: EditorMode, current: EditorMode): string {
+    if (target === current) {
+        return {
+            blocks: "Visual editing with menus for layout and style.",
+            markdown: "Plain-text editing with the same site design.",
+            html: "CodePen-style HTML, CSS & JS panes.",
+        }[target];
+    }
+    switch (target) {
+        case "blocks":
+            return current === "markdown"
+                ? "By converting back to Simple, you will lose changes made in Markdown mode."
+                : "By converting back to Simple, you will lose changes made in HTML mode.";
+        case "markdown":
+            return current === "blocks"
+                ? "All simple layouts can be converted to Markdown."
+                : "By converting back to Markdown, you will lose changes made in HTML mode.";
+        case "html":
+            return current === "blocks"
+                ? "All simple layouts can be converted to HTML."
+                : "All Markdown can be converted to HTML.";
+    }
+}
+
 function ModeSwitcher({
     mode,
     open,
     onToggle,
-    onMarkdown,
-    onHtml,
-    onSimple,
+    onSelect,
 }: {
     mode: EditorMode;
     open: boolean;
     onToggle: () => void;
-    onMarkdown: () => void;
-    onHtml: () => void;
-    onSimple: () => void;
+    onSelect: (target: EditorMode) => void;
 }) {
     return (
         <div className="mode-wrap action-item">
@@ -1158,42 +1211,25 @@ function ModeSwitcher({
             </button>
             {open && (
                 <div className="mode-menu" role="menu">
-                    {mode === "blocks" && (
-                        <>
-                            <button onClick={onMarkdown} role="menuitem">
-                                <span className="tmpl-name">Convert to Markdown</span>
-                                <span className="tmpl-desc">
-                                    Plain text with headings, lists, code. Same site
-                                    design.
-                                </span>
-                            </button>
-                            <button onClick={onHtml} role="menuitem">
-                                <span className="tmpl-name">Convert to HTML</span>
-                                <span className="tmpl-desc">
-                                    Separate HTML, CSS &amp; JS panes —
-                                    CodePen-style full control.
-                                </span>
-                            </button>
-                        </>
-                    )}
-                    {mode === "markdown" && (
-                        <button onClick={onHtml} role="menuitem">
-                            <span className="tmpl-name">Convert to HTML</span>
+                    {(["blocks", "markdown", "html"] as const).map((target) => (
+                        <button
+                            key={target}
+                            onClick={() => onSelect(target)}
+                            role="menuitemradio"
+                            aria-checked={target === mode}
+                            className={target === mode ? "is-active" : ""}
+                        >
+                            <span className="tmpl-name">
+                                {MODE_NAMES[target]}
+                                {target === mode && (
+                                    <span className="mode-current"> ✓ current</span>
+                                )}
+                            </span>
                             <span className="tmpl-desc">
-                                Separate HTML, CSS &amp; JS panes —
-                                CodePen-style full control.
+                                {modeDescription(target, mode)}
                             </span>
                         </button>
-                    )}
-                    {mode !== "blocks" && (
-                        <button onClick={onSimple} role="menuitem">
-                            <span className="tmpl-name">Back to Simple editor</span>
-                            <span className="tmpl-desc">
-                                Restores your last block-editor state. Text edits here
-                                are discarded.
-                            </span>
-                        </button>
-                    )}
+                    ))}
                 </div>
             )}
             <span className="action-label" aria-hidden="true">
