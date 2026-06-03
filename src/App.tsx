@@ -519,6 +519,18 @@ export default function App() {
                             paragraphs, links, or images — make it your own.
                         </p>
                     )}
+                    {/* Mirrors the footer wrapMain() bakes into the artifact. */}
+                    <footer className="site-footer">
+                        made with{" "}
+                        <a
+                            href="https://github.com/shawntabrizi/hello-playground"
+                            target="_blank"
+                            rel="noopener"
+                            style={{ color: content.accentColor }}
+                        >
+                            hello-playground
+                        </a>
+                    </footer>
                 </article>
             </main>
             )}

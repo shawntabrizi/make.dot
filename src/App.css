@@ -167,6 +167,10 @@ body {
     word-break: break-word;
 }
 .site-divider { border: 0; border-top: 1px solid var(--site-divider, rgba(255,255,255,0.15)); margin: 32px 0; }
+/* Same treatment as the artifact's `footer` rule in shellCss. */
+.site-footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
+.site-footer a { text-decoration: underline; text-underline-offset: 3px; }
+
 .site-tip {
     color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 60%);
     font-size: 13px;
