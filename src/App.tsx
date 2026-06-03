@@ -24,8 +24,13 @@ import {
 import { checkBulletinAuthorization, storeBytes } from "./lib/bulletin/store.ts";
 import { resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
+import { blocksToMarkdown, renderMarkdownHtml } from "./markdown.ts";
 
 type View = "edit" | "preview" | "deploy";
+// The one-way "eject" ladder: blocks → markdown → html are exact conversions;
+// going back up restores the last block-editor state (kept in memory) and
+// discards the text edits — never a lossy parse.
+type EditorMode = "blocks" | "markdown" | "html";
 type DeployResult = DeployPreview | DeploySuccess;
 
 interface ProgressStep {
@@ -91,6 +96,9 @@ const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
 
 export default function App() {
     const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
+    const [mode, setMode] = useState<EditorMode>("blocks");
+    const [markdownText, setMarkdownText] = useState("");
+    const [htmlText, setHtmlText] = useState("");
     const [view, setView] = useState<View>("edit");
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
@@ -101,6 +109,7 @@ export default function App() {
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const [templatesMenuOpen, setTemplatesMenuOpen] = useState(false);
     const [fontMenuOpen, setFontMenuOpen] = useState(false);
+    const [modeMenuOpen, setModeMenuOpen] = useState(false);
     const [undoPayload, setUndoPayload] = useState<{
         prior: SiteContent;
         templateName: string;
@@ -183,6 +192,56 @@ export default function App() {
         return () => clearTimeout(t);
     }, [undoPayload]);
 
+    // The single HTML source of truth — preview and deploy both consume this,
+    // so they stay mode-agnostic.
+    const currentHtml = (): string => {
+        switch (mode) {
+            case "blocks":
+                return renderHtml(content);
+            case "markdown":
+                return renderMarkdownHtml(markdownText, content);
+            case "html":
+                return htmlText;
+        }
+    };
+
+    const convertToMarkdown = () => {
+        if (
+            !window.confirm(
+                "Convert to Markdown?\n\nYour content becomes plain text — headings, lists, and code become possible. You can return to the simple editor later, but text edits won't carry back.",
+            )
+        )
+            return;
+        setMarkdownText(blocksToMarkdown(content));
+        setMode("markdown");
+        setModeMenuOpen(false);
+    };
+    const convertToHtml = () => {
+        if (
+            !window.confirm(
+                "Convert to raw HTML?\n\nYou get the full document — styles, layout, everything. You can return to the simple editor later, but HTML edits won't carry back.",
+            )
+        )
+            return;
+        setHtmlText(
+            mode === "markdown"
+                ? renderMarkdownHtml(markdownText, content)
+                : renderHtml(content),
+        );
+        setMode("html");
+        setModeMenuOpen(false);
+    };
+    const backToSimple = () => {
+        if (
+            !window.confirm(
+                "Back to the simple editor?\n\nThis restores your last block-editor state. Your Markdown/HTML edits will be discarded.",
+            )
+        )
+            return;
+        setMode("blocks");
+        setModeMenuOpen(false);
+    };
+
     const uploadImage = async (
         file: File,
         onStatus: (msg: string) => void,
@@ -245,7 +304,7 @@ export default function App() {
             setDeployStep(stepForDeployStatus(message));
         };
         try {
-            const html = renderHtml(content);
+            const html = currentHtml();
             if (activeAccount?.source === "dev") {
                 const stored = await deployFull(
                     html,
@@ -316,6 +375,36 @@ export default function App() {
 
     return (
         <>
+            {mode !== "blocks" &&
+                (isEditing ? (
+                    <main className="code-pane">
+                        <textarea
+                            className="code-editor"
+                            value={mode === "markdown" ? markdownText : htmlText}
+                            onChange={(e) =>
+                                mode === "markdown"
+                                    ? setMarkdownText(e.target.value)
+                                    : setHtmlText(e.target.value)
+                            }
+                            spellCheck={false}
+                            aria-label={
+                                mode === "markdown" ? "Markdown source" : "HTML source"
+                            }
+                        />
+                    </main>
+                ) : (
+                    // Preview IS the deploy artifact. sandbox without
+                    // allow-same-origin: pasted scripts run, but in an opaque
+                    // origin that can't reach the app (and its signer).
+                    <iframe
+                        className="site-frame"
+                        title="Site preview"
+                        srcDoc={currentHtml()}
+                        sandbox="allow-scripts allow-popups"
+                    />
+                ))}
+
+            {mode === "blocks" && (
             <main className={`site ${isEditing ? "is-editing" : ""}`} style={siteStyle}>
                 <article className="site-inner">
                     {avatarBlock ? (
@@ -361,6 +450,7 @@ export default function App() {
                     )}
                 </article>
             </main>
+            )}
 
             {undoPayload && (
                 <div className="toast" role="status" aria-live="polite">
@@ -375,6 +465,7 @@ export default function App() {
             {isEditing && (
                 <div className="float-bottom">
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
+                        {mode === "blocks" && (
                         <div className="tmpl-wrap action-item">
                             <button
                                 className="action-btn"
@@ -414,6 +505,9 @@ export default function App() {
                                 Layout
                             </span>
                         </div>
+                        )}
+                        {mode !== "html" && (
+                        <>
                         <ColorSwatch
                             label="Accent"
                             value={content.accentColor}
@@ -460,6 +554,9 @@ export default function App() {
                                 Font
                             </span>
                         </div>
+                        </>
+                        )}
+                        {mode === "blocks" && (
                         <div className="add-wrap action-item">
                             <button
                                 className="action-btn"
@@ -484,6 +581,15 @@ export default function App() {
                                 Add
                             </span>
                         </div>
+                        )}
+                        <ModeSwitcher
+                            mode={mode}
+                            open={modeMenuOpen}
+                            onToggle={() => setModeMenuOpen((v) => !v)}
+                            onMarkdown={convertToMarkdown}
+                            onHtml={convertToHtml}
+                            onSimple={backToSimple}
+                        />
                     </div>
                 </div>
             )}
@@ -730,6 +836,81 @@ function NavTab({
             {icon}
             <span className="nav-tab-label">{label}</span>
         </button>
+    );
+}
+
+// The eject ladder's UI: downward conversions (exact) plus the revert back to
+// the simple editor. Options depend on where you are on the ladder.
+function ModeSwitcher({
+    mode,
+    open,
+    onToggle,
+    onMarkdown,
+    onHtml,
+    onSimple,
+}: {
+    mode: EditorMode;
+    open: boolean;
+    onToggle: () => void;
+    onMarkdown: () => void;
+    onHtml: () => void;
+    onSimple: () => void;
+}) {
+    return (
+        <div className="mode-wrap action-item">
+            <button
+                className="action-btn"
+                onClick={onToggle}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                title="Editing mode"
+            >
+                <CodeIcon />
+            </button>
+            {open && (
+                <div className="mode-menu" role="menu">
+                    {mode === "blocks" && (
+                        <>
+                            <button onClick={onMarkdown} role="menuitem">
+                                <span className="tmpl-name">Convert to Markdown</span>
+                                <span className="tmpl-desc">
+                                    Plain text with headings, lists, code. Same site
+                                    design.
+                                </span>
+                            </button>
+                            <button onClick={onHtml} role="menuitem">
+                                <span className="tmpl-name">Convert to HTML</span>
+                                <span className="tmpl-desc">
+                                    Full control of the document — styles, scripts,
+                                    everything.
+                                </span>
+                            </button>
+                        </>
+                    )}
+                    {mode === "markdown" && (
+                        <button onClick={onHtml} role="menuitem">
+                            <span className="tmpl-name">Convert to HTML</span>
+                            <span className="tmpl-desc">
+                                Full control of the document — styles, scripts,
+                                everything.
+                            </span>
+                        </button>
+                    )}
+                    {mode !== "blocks" && (
+                        <button onClick={onSimple} role="menuitem">
+                            <span className="tmpl-name">Back to Simple editor</span>
+                            <span className="tmpl-desc">
+                                Restores your last block-editor state. Text edits here
+                                are discarded.
+                            </span>
+                        </button>
+                    )}
+                </div>
+            )}
+            <span className="action-label" aria-hidden="true">
+                Mode
+            </span>
+        </div>
     );
 }
 
@@ -1068,6 +1249,14 @@ function Row({
 }
 
 // Inline SVG icons. Lightweight, no dep.
+function CodeIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="16 18 22 12 16 6" />
+            <polyline points="8 6 2 12 8 18" />
+        </svg>
+    );
+}
 function PencilIcon() {
     return (
         <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

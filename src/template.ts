@@ -121,37 +121,22 @@ function renderBlock(block: Block): string {
     }
 }
 
-export function renderHtml(content: SiteContent): string {
-    const title = content.header || "hello";
-    const accent = escape(content.accentColor);
-    const background = escape(content.background);
-    const font = escape(content.fontFamily);
-    const colors = siteColors(content.background);
-    const accentContrast = siteColors(content.accentColor).foreground;
+// The theme inputs the document shell needs — a subset of SiteContent so the
+// markdown renderer can reuse the shell without a full block model.
+export interface PageTheme {
+    accentColor: string;
+    background: string;
+    fontFamily: string;
+}
 
-    // Profile layout: lift the first avatar block out of the body and put it
-    // beside the header/subheader in a two-column row. Falls back to default
-    // single-column flow if no avatar block is found.
-    const isProfile = content.layout === "profile";
-    const avatarIdx = isProfile
-        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
-        : -1;
-    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
-    const bodyBlocks = avatarBlock
-        ? content.blocks.filter((_, i) => i !== avatarIdx)
-        : content.blocks;
-    const blocks = bodyBlocks.map(renderBlock).join("\n        ");
-
-    const headerHtml = avatarBlock
-        ? `<header class="profile-header">
-        ${renderBlock(avatarBlock)}
-        <div class="profile-header-text">
-            <h1>${escape(content.header)}</h1>
-            <p class="subheader">${escape(content.subheader)}</p>
-        </div>
-    </header>`
-        : `<h1>${escape(content.header)}</h1>
-    <p class="subheader">${escape(content.subheader)}</p>`;
+// The shared page chrome: full HTML document with inline CSS, wrapping
+// whatever body markup the caller produced (rendered blocks or markdown).
+export function renderShell(title: string, bodyHtml: string, theme: PageTheme): string {
+    const accent = escape(theme.accentColor);
+    const background = escape(theme.background);
+    const font = escape(theme.fontFamily);
+    const colors = siteColors(theme.background);
+    const accentContrast = siteColors(theme.accentColor).foreground;
 
     return `<!doctype html>
 <html lang="en">
@@ -180,7 +165,16 @@ h1 {
     line-height: 1.1;
 }
 .subheader { margin: 0 0 32px; font-size: 18px; opacity: 0.85; }
+h2, h3 { letter-spacing: -0.01em; line-height: 1.2; margin: 32px 0 12px; }
+h2 { font-size: 28px; }
+h3 { font-size: 22px; }
 p { margin: 0 0 16px; }
+ul, ol { margin: 0 0 16px; padding-left: 24px; }
+li { margin: 4px 0; }
+blockquote { margin: 0 0 16px; padding-left: 16px; border-left: 3px solid ${accent}; opacity: 0.85; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 0.9em; background: ${colors.divider}; padding: 2px 5px; border-radius: 4px; }
+pre { margin: 0 0 16px; padding: 16px; background: ${colors.divider}; border-radius: 12px; overflow-x: auto; }
+pre code { background: none; padding: 0; }
 a { color: ${accent}; text-decoration: underline; text-underline-offset: 3px; }
 a:hover { opacity: 0.8; }
 img { max-width: 100%; height: auto; border-radius: 12px; margin: 16px 0; }
@@ -222,11 +216,38 @@ footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
 </head>
 <body>
 <main>
-    ${headerHtml}
-    ${blocks}
+    ${bodyHtml}
     <footer>made with <a href="https://github.com/shawntabrizi/hello-playground" target="_blank" rel="noopener">hello-playground</a></footer>
 </main>
 </body>
 </html>
 `;
+}
+
+export function renderHtml(content: SiteContent): string {
+    // Profile layout: lift the first avatar block out of the body and put it
+    // beside the header/subheader in a two-column row. Falls back to default
+    // single-column flow if no avatar block is found.
+    const isProfile = content.layout === "profile";
+    const avatarIdx = isProfile
+        ? content.blocks.findIndex((b) => b.type === "image" && b.variant === "avatar")
+        : -1;
+    const avatarBlock = avatarIdx >= 0 ? content.blocks[avatarIdx] : null;
+    const bodyBlocks = avatarBlock
+        ? content.blocks.filter((_, i) => i !== avatarIdx)
+        : content.blocks;
+    const blocks = bodyBlocks.map(renderBlock).join("\n        ");
+
+    const headerHtml = avatarBlock
+        ? `<header class="profile-header">
+        ${renderBlock(avatarBlock)}
+        <div class="profile-header-text">
+            <h1>${escape(content.header)}</h1>
+            <p class="subheader">${escape(content.subheader)}</p>
+        </div>
+    </header>`
+        : `<h1>${escape(content.header)}</h1>
+    <p class="subheader">${escape(content.subheader)}</p>`;
+
+    return renderShell(content.header || "hello", `${headerHtml}\n    ${blocks}`, content);
 }
