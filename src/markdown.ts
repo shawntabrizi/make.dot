@@ -4,7 +4,15 @@
 // (accent/bg/font) keep working.
 
 import { marked } from "marked";
-import { renderShell, type PageTheme, type SiteContent } from "./template.ts";
+import {
+    assembleDocument,
+    escapeHtml,
+    shellCss,
+    wrapMain,
+    type DocumentParts,
+    type PageTheme,
+    type SiteContent,
+} from "./template.ts";
 
 // Exact downgrade of the block model. Header/subheader become the leading
 // heading + paragraph; the profile layout's avatar treatment is the one thing
@@ -39,7 +47,15 @@ function titleFromMarkdown(markdown: string): string {
     return m ? m[1].trim() : "hello";
 }
 
-export function renderMarkdownHtml(markdown: string, theme: PageTheme): string {
+export function renderMarkdownParts(markdown: string, theme: PageTheme): DocumentParts {
     const body = marked.parse(markdown, { async: false });
-    return renderShell(titleFromMarkdown(markdown), body, theme);
+    return {
+        title: escapeHtml(titleFromMarkdown(markdown)),
+        css: shellCss(theme, ["markdown"]),
+        bodyHtml: wrapMain(body),
+    };
+}
+
+export function renderMarkdownHtml(markdown: string, theme: PageTheme): string {
+    return assembleDocument(renderMarkdownParts(markdown, theme));
 }

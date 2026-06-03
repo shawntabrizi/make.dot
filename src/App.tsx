@@ -1,9 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Editable } from "./Editable.tsx";
 import {
+    assembleDocument,
     DEFAULT_CONTENT,
+    DEFAULT_FONT_SIZE,
     FONT_OPTIONS,
     renderHtml,
+    renderHtmlParts,
     siteColors,
     type Block,
     type SiteContent,
@@ -24,7 +27,11 @@ import {
 import { checkBulletinAuthorization, storeBytes } from "./lib/bulletin/store.ts";
 import { resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
-import { blocksToMarkdown, renderMarkdownHtml } from "./markdown.ts";
+import {
+    blocksToMarkdown,
+    renderMarkdownHtml,
+    renderMarkdownParts,
+} from "./markdown.ts";
 
 type View = "edit" | "preview" | "deploy";
 // The one-way "eject" ladder: blocks → markdown → html are exact conversions;
@@ -32,7 +39,19 @@ type View = "edit" | "preview" | "deploy";
 // discards the text edits — never a lossy parse.
 type EditorMode = "blocks" | "markdown" | "html";
 // One open menu at a time — a single state slot makes overlap impossible.
-type ActionMenu = "layout" | "font" | "add" | "mode";
+type ActionMenu = "layout" | "colors" | "font" | "add" | "mode";
+// HTML mode is CodePen-style: three panes assembled into one document.
+type HtmlPane = "html" | "css" | "js";
+const PANE_GLYPHS: Record<HtmlPane, string> = { html: "<>", css: "{}", js: "JS" };
+
+// <title> for assembled pane documents: first <h1>'s text, falling back to
+// the same default the blocks renderer uses. The h1 markup is already
+// entity-encoded, so the result is safe for <title> once tags are stripped.
+function titleFromHtml(body: string): string {
+    const m = body.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+    const text = m ? m[1].replace(/<[^>]*>/g, "").trim() : "";
+    return text || "hello";
+}
 type DeployResult = DeployPreview | DeploySuccess;
 
 interface ProgressStep {
@@ -100,7 +119,11 @@ export default function App() {
     const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
     const [mode, setMode] = useState<EditorMode>("blocks");
     const [markdownText, setMarkdownText] = useState("");
+    // HTML mode panes: body markup, stylesheet, script — CodePen-style.
     const [htmlText, setHtmlText] = useState("");
+    const [cssText, setCssText] = useState("");
+    const [jsText, setJsText] = useState("");
+    const [htmlPane, setHtmlPane] = useState<HtmlPane>("html");
     const [view, setView] = useState<View>("edit");
     const [domain, setDomain] = useState("");
     const [busy, setBusy] = useState(false);
@@ -202,7 +225,12 @@ export default function App() {
             case "markdown":
                 return renderMarkdownHtml(markdownText, content);
             case "html":
-                return htmlText;
+                return assembleDocument({
+                    title: titleFromHtml(htmlText),
+                    css: cssText,
+                    bodyHtml: htmlText,
+                    js: jsText,
+                });
         }
     };
 
@@ -220,15 +248,18 @@ export default function App() {
     const convertToHtml = () => {
         if (
             !window.confirm(
-                "Convert to raw HTML?\n\nYou get the full document — styles, layout, everything. You can return to the simple editor later, but HTML edits won't carry back.",
+                "Convert to HTML, CSS & JS?\n\nYour page splits into editable HTML, CSS, and JavaScript panes. You can return to the simple editor later, but edits here won't carry back.",
             )
         )
             return;
-        setHtmlText(
+        const parts =
             mode === "markdown"
-                ? renderMarkdownHtml(markdownText, content)
-                : renderHtml(content),
-        );
+                ? renderMarkdownParts(markdownText, content)
+                : renderHtmlParts(content);
+        setHtmlText(parts.bodyHtml);
+        setCssText(parts.css);
+        setJsText("");
+        setHtmlPane("html");
         setMode("html");
         setOpenMenu(null);
     };
@@ -333,11 +364,13 @@ export default function App() {
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
     const colors = siteColors(content.background);
+    const foreground = content.textColor ?? colors.foreground;
     const siteStyle = {
         background: content.background,
         fontFamily: content.fontFamily,
-        color: colors.foreground,
-        "--site-foreground": colors.foreground,
+        fontSize: content.fontSize ?? DEFAULT_FONT_SIZE,
+        color: foreground,
+        "--site-foreground": foreground,
         "--site-divider": colors.divider,
     } as React.CSSProperties;
 
@@ -381,15 +414,32 @@ export default function App() {
                     <main className="code-pane">
                         <textarea
                             className="code-editor"
-                            value={mode === "markdown" ? markdownText : htmlText}
-                            onChange={(e) =>
+                            value={
                                 mode === "markdown"
-                                    ? setMarkdownText(e.target.value)
-                                    : setHtmlText(e.target.value)
+                                    ? markdownText
+                                    : htmlPane === "css"
+                                      ? cssText
+                                      : htmlPane === "js"
+                                        ? jsText
+                                        : htmlText
                             }
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                if (mode === "markdown") setMarkdownText(v);
+                                else if (htmlPane === "css") setCssText(v);
+                                else if (htmlPane === "js") setJsText(v);
+                                else setHtmlText(v);
+                            }}
                             spellCheck={false}
+                            placeholder={
+                                mode === "html" && htmlPane === "js"
+                                    ? "// Runs at the end of <body>"
+                                    : undefined
+                            }
                             aria-label={
-                                mode === "markdown" ? "Markdown source" : "HTML source"
+                                mode === "markdown"
+                                    ? "Markdown source"
+                                    : `${htmlPane.toUpperCase()} source`
                             }
                         />
                     </main>
@@ -509,16 +559,51 @@ export default function App() {
                         )}
                         {mode !== "html" && (
                         <>
-                        <ColorSwatch
-                            label="Accent"
-                            value={content.accentColor}
-                            onChange={(v) => update("accentColor", v)}
-                        />
-                        <ColorSwatch
-                            label="Bg"
-                            value={content.background}
-                            onChange={(v) => update("background", v)}
-                        />
+                        <div className="colors-wrap action-item">
+                            <button
+                                className="action-btn"
+                                onClick={() => toggleMenu("colors")}
+                                aria-haspopup="menu"
+                                aria-expanded={openMenu === "colors"}
+                                title="Colors"
+                            >
+                                <PaletteIcon />
+                            </button>
+                            {openMenu === "colors" && (
+                                <div className="colors-menu" role="menu">
+                                    <StyleRow
+                                        label="Accent"
+                                        value={content.accentColor}
+                                        onChange={(v) => update("accentColor", v)}
+                                    />
+                                    <StyleRow
+                                        label="Background"
+                                        value={content.background}
+                                        onChange={(v) => update("background", v)}
+                                    />
+                                    <StyleRow
+                                        label="Text"
+                                        value={foreground}
+                                        onChange={(v) => update("textColor", v)}
+                                    >
+                                        {content.textColor && (
+                                            <button
+                                                className="style-auto"
+                                                onClick={() =>
+                                                    update("textColor", undefined)
+                                                }
+                                                title="Auto-pick for contrast against the background"
+                                            >
+                                                Auto
+                                            </button>
+                                        )}
+                                    </StyleRow>
+                                </div>
+                            )}
+                            <span className="action-label" aria-hidden="true">
+                                Colors
+                            </span>
+                        </div>
                         <div className="font-wrap action-item">
                             <button
                                 className="action-btn font-btn"
@@ -549,6 +634,13 @@ export default function App() {
                                             {opt.label}
                                         </button>
                                     ))}
+                                    <FontSizeStepper
+                                        value={parseInt(
+                                            content.fontSize ?? DEFAULT_FONT_SIZE,
+                                            10,
+                                        )}
+                                        onChange={(n) => update("fontSize", `${n}px`)}
+                                    />
                                 </div>
                             )}
                             <span className="action-label" aria-hidden="true">
@@ -583,6 +675,24 @@ export default function App() {
                             </span>
                         </div>
                         )}
+                        {mode === "html" &&
+                            (["html", "css", "js"] as const).map((pane) => (
+                                <div key={pane} className="action-item">
+                                    <button
+                                        className={`action-btn pane-btn ${
+                                            htmlPane === pane ? "is-active" : ""
+                                        }`}
+                                        onClick={() => setHtmlPane(pane)}
+                                        aria-pressed={htmlPane === pane}
+                                        title={`Edit ${pane.toUpperCase()}`}
+                                    >
+                                        {PANE_GLYPHS[pane]}
+                                    </button>
+                                    <span className="action-label" aria-hidden="true">
+                                        {pane.toUpperCase()}
+                                    </span>
+                                </div>
+                            ))}
                         <ModeSwitcher
                             mode={mode}
                             open={openMenu === "mode"}
@@ -882,8 +992,8 @@ function ModeSwitcher({
                             <button onClick={onHtml} role="menuitem">
                                 <span className="tmpl-name">Convert to HTML</span>
                                 <span className="tmpl-desc">
-                                    Full control of the document — styles, scripts,
-                                    everything.
+                                    Separate HTML, CSS &amp; JS panes —
+                                    CodePen-style full control.
                                 </span>
                             </button>
                         </>
@@ -892,8 +1002,8 @@ function ModeSwitcher({
                         <button onClick={onHtml} role="menuitem">
                             <span className="tmpl-name">Convert to HTML</span>
                             <span className="tmpl-desc">
-                                Full control of the document — styles, scripts,
-                                everything.
+                                Separate HTML, CSS &amp; JS panes —
+                                CodePen-style full control.
                             </span>
                         </button>
                     )}
@@ -915,17 +1025,81 @@ function ModeSwitcher({
     );
 }
 
-function ColorSwatch({
+// − / value / + stepper for the base font size (px). Clicking the number swaps
+// it for a text input; Enter or blur commits, Escape cancels.
+function FontSizeStepper({
+    value,
+    onChange,
+}: {
+    value: number;
+    onChange: (next: number) => void;
+}) {
+    const [draft, setDraft] = useState<string | null>(null);
+    const clamp = (n: number) => Math.min(40, Math.max(8, Math.round(n)));
+    const commit = () => {
+        if (draft !== null) {
+            const n = parseInt(draft, 10);
+            if (!Number.isNaN(n)) onChange(clamp(n));
+        }
+        setDraft(null);
+    };
+    return (
+        <div className="font-size-row" role="group" aria-label="Font size">
+            <button
+                onClick={() => onChange(clamp(value - 1))}
+                aria-label="Decrease font size"
+            >
+                −
+            </button>
+            {draft !== null ? (
+                <input
+                    autoFocus
+                    inputMode="numeric"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={commit}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") commit();
+                        if (e.key === "Escape") setDraft(null);
+                    }}
+                    aria-label="Font size in pixels"
+                />
+            ) : (
+                <button
+                    className="font-size-value"
+                    onClick={() => setDraft(String(value))}
+                    title="Click to type a size"
+                >
+                    {value}
+                </button>
+            )}
+            <button
+                onClick={() => onChange(clamp(value + 1))}
+                aria-label="Increase font size"
+            >
+                +
+            </button>
+        </div>
+    );
+}
+
+// A labelled color-picker row inside the Colors menu. `children` slots extra
+// controls between the label and the swatch (e.g. the Text row's Auto reset).
+function StyleRow({
     label,
     value,
     onChange,
+    children,
 }: {
     label: string;
     value: string;
     onChange: (next: string) => void;
+    children?: React.ReactNode;
 }) {
     return (
-        <div className="action-item">
+        <div className="style-row">
+            <span className="style-row-label">{label}</span>
+            {children}
             <label
                 className="swatch"
                 title={`${label}: ${value}`}
@@ -939,9 +1113,6 @@ function ColorSwatch({
                     aria-label={`${label} color`}
                 />
             </label>
-            <span className="action-label" aria-hidden="true">
-                {label}
-            </span>
         </div>
     );
 }
@@ -1250,6 +1421,16 @@ function Row({
 }
 
 // Inline SVG icons. Lightweight, no dep.
+function PaletteIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 2a10 10 0 1 0 0 20c1 0 1.6-.75 1.6-1.7 0-.44-.17-.84-.44-1.13-.26-.29-.43-.68-.43-1.12a1.65 1.65 0 0 1 1.67-1.67h2c3.05 0 5.6-2.5 5.6-5.55C22 6 17.5 2 12 2z" />
+            <circle cx="7" cy="11" r="0.5" fill="currentColor" />
+            <circle cx="10" cy="7" r="0.5" fill="currentColor" />
+            <circle cx="15" cy="7" r="0.5" fill="currentColor" />
+        </svg>
+    );
+}
 function CodeIcon() {
     return (
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
