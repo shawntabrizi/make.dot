@@ -31,6 +31,8 @@ type View = "edit" | "preview" | "deploy";
 // going back up restores the last block-editor state (kept in memory) and
 // discards the text edits — never a lossy parse.
 type EditorMode = "blocks" | "markdown" | "html";
+// One open menu at a time — a single state slot makes overlap impossible.
+type ActionMenu = "layout" | "font" | "add" | "mode";
 type DeployResult = DeployPreview | DeploySuccess;
 
 interface ProgressStep {
@@ -106,10 +108,9 @@ export default function App() {
     const [deployStep, setDeployStep] = useState<number | null>(null);
     const [result, setResult] = useState<DeployResult | null>(null);
     const [deployError, setDeployError] = useState<string | null>(null);
-    const [addMenuOpen, setAddMenuOpen] = useState(false);
-    const [templatesMenuOpen, setTemplatesMenuOpen] = useState(false);
-    const [fontMenuOpen, setFontMenuOpen] = useState(false);
-    const [modeMenuOpen, setModeMenuOpen] = useState(false);
+    const [openMenu, setOpenMenu] = useState<ActionMenu | null>(null);
+    const toggleMenu = (menu: ActionMenu) =>
+        setOpenMenu((prev) => (prev === menu ? null : menu));
     const [undoPayload, setUndoPayload] = useState<{
         prior: SiteContent;
         templateName: string;
@@ -173,13 +174,13 @@ export default function App() {
         setContent((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
     const addBlock = (type: Block["type"]) => {
         setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
-        setAddMenuOpen(false);
+        setOpenMenu(null);
     };
 
     const applyTemplate = (template: Template) => {
         setUndoPayload({ prior: content, templateName: template.name });
         setContent(template.build());
-        setTemplatesMenuOpen(false);
+        setOpenMenu(null);
     };
     const undoTemplate = () => {
         if (!undoPayload) return;
@@ -214,7 +215,7 @@ export default function App() {
             return;
         setMarkdownText(blocksToMarkdown(content));
         setMode("markdown");
-        setModeMenuOpen(false);
+        setOpenMenu(null);
     };
     const convertToHtml = () => {
         if (
@@ -229,7 +230,7 @@ export default function App() {
                 : renderHtml(content),
         );
         setMode("html");
-        setModeMenuOpen(false);
+        setOpenMenu(null);
     };
     const backToSimple = () => {
         if (
@@ -239,7 +240,7 @@ export default function App() {
         )
             return;
         setMode("blocks");
-        setModeMenuOpen(false);
+        setOpenMenu(null);
     };
 
     const uploadImage = async (
@@ -469,9 +470,9 @@ export default function App() {
                         <div className="tmpl-wrap action-item">
                             <button
                                 className="action-btn"
-                                onClick={() => setTemplatesMenuOpen((v) => !v)}
+                                onClick={() => toggleMenu("layout")}
                                 aria-haspopup="menu"
-                                aria-expanded={templatesMenuOpen}
+                                aria-expanded={openMenu === "layout"}
                                 title="Pick a starter layout"
                             >
                                 <svg
@@ -487,7 +488,7 @@ export default function App() {
                                     <rect x="8" y="8" width="6" height="6" rx="1" />
                                 </svg>
                             </button>
-                            {templatesMenuOpen && (
+                            {openMenu === "layout" && (
                                 <div className="tmpl-menu" role="menu">
                                     {TEMPLATES.map((t) => (
                                         <button
@@ -521,14 +522,14 @@ export default function App() {
                         <div className="font-wrap action-item">
                             <button
                                 className="action-btn font-btn"
-                                onClick={() => setFontMenuOpen((v) => !v)}
+                                onClick={() => toggleMenu("font")}
                                 aria-haspopup="menu"
-                                aria-expanded={fontMenuOpen}
+                                aria-expanded={openMenu === "font"}
                                 title="Font family"
                             >
                                 Aa
                             </button>
-                            {fontMenuOpen && (
+                            {openMenu === "font" && (
                                 <div className="font-menu" role="menu">
                                     {FONT_OPTIONS.map((opt) => (
                                         <button
@@ -542,7 +543,7 @@ export default function App() {
                                             style={{ fontFamily: opt.value }}
                                             onClick={() => {
                                                 update("fontFamily", opt.value);
-                                                setFontMenuOpen(false);
+                                                setOpenMenu(null);
                                             }}
                                         >
                                             {opt.label}
@@ -560,14 +561,14 @@ export default function App() {
                         <div className="add-wrap action-item">
                             <button
                                 className="action-btn"
-                                onClick={() => setAddMenuOpen((v) => !v)}
+                                onClick={() => toggleMenu("add")}
                                 aria-haspopup="menu"
-                                aria-expanded={addMenuOpen}
+                                aria-expanded={openMenu === "add"}
                                 title="Add element"
                             >
                                 +
                             </button>
-                            {addMenuOpen && (
+                            {openMenu === "add" && (
                                 <div className="add-menu" role="menu">
                                     <button onClick={() => addBlock("paragraph")}>
                                         Paragraph
@@ -584,8 +585,8 @@ export default function App() {
                         )}
                         <ModeSwitcher
                             mode={mode}
-                            open={modeMenuOpen}
-                            onToggle={() => setModeMenuOpen((v) => !v)}
+                            open={openMenu === "mode"}
+                            onToggle={() => toggleMenu("mode")}
                             onMarkdown={convertToMarkdown}
                             onHtml={convertToHtml}
                             onSimple={backToSimple}
@@ -741,7 +742,7 @@ export default function App() {
                         active={view === "edit"}
                         onClick={() => {
                             setView("edit");
-                            setAddMenuOpen(false);
+                            setOpenMenu(null);
                         }}
                         icon={<PencilIcon />}
                         label="Edit"
@@ -750,7 +751,7 @@ export default function App() {
                         active={view === "preview"}
                         onClick={() => {
                             setView("preview");
-                            setAddMenuOpen(false);
+                            setOpenMenu(null);
                         }}
                         icon={<EyeIcon />}
                         label="Preview"
@@ -759,7 +760,7 @@ export default function App() {
                         active={view === "deploy"}
                         onClick={() => {
                             setView("deploy");
-                            setAddMenuOpen(false);
+                            setOpenMenu(null);
                         }}
                         icon={<RocketIcon />}
                         label="Deploy"
