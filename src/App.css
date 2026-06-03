@@ -249,7 +249,31 @@ body {
     bottom: calc(76px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
     transform: translateX(-50%);
     z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
+
+/* Undo/redo satellites — same chrome family as the bar, bigger touch target. */
+.float-circle {
+    width: 40px; height: 40px;
+    flex-shrink: 0;
+    border-radius: 999px;
+    background: var(--chrome-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--chrome-border);
+    color: var(--chrome-text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.15s, opacity 0.15s;
+}
+.float-circle svg { width: 18px; height: 18px; }
+.float-circle:hover { border-color: rgba(255,255,255,0.3); }
+.float-circle:disabled { opacity: 0.35; cursor: default; }
+.float-circle:disabled:hover { border-color: var(--chrome-border); }
 
 .action-bar {
     display: flex;
@@ -412,6 +436,8 @@ body {
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .action-btn:hover { border-color: rgba(255,255,255,0.3); }
+.action-btn:disabled { opacity: 0.35; cursor: default; }
+.action-btn:disabled:hover { border-color: var(--chrome-border); }
 
 /* Subtitle under each action-bar control — mirrors .nav-tab-label */
 .action-item {

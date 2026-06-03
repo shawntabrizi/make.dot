@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Editable } from "./Editable.tsx";
 
 // Lazy: CodeMirror is its own chunk, fetched only when md/html mode is opened.
 const CodeEditor = React.lazy(() => import("./CodeEditor.tsx"));
+import type { EditorHandle } from "./CodeEditor.tsx";
 import {
     assembleDocument,
     DEFAULT_CONTENT,
@@ -111,6 +112,36 @@ function makeBlockId(): string {
     return Math.random().toString(36).slice(2, 10);
 }
 
+// Draft autosave: the full editing state, debounced into localStorage so a
+// refresh/crash never loses work. Undo history is session-only by design.
+const STORAGE_KEY = "hello-playground.draft.v1";
+
+interface Draft {
+    mode: EditorMode;
+    content: SiteContent;
+    markdownText: string;
+    htmlText: string;
+    cssText: string;
+    jsText: string;
+}
+
+function loadDraft(): Draft | null {
+    try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        const d = JSON.parse(raw) as Draft;
+        if (!d || typeof d !== "object") return null;
+        if (!d.content || !Array.isArray(d.content.blocks)) return null;
+        if (!["blocks", "markdown", "html"].includes(d.mode)) return null;
+        return d;
+    } catch {
+        // Unavailable storage (private mode, sandbox) or corrupt JSON.
+        return null;
+    }
+}
+
+const initialDraft = loadDraft();
+
 const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
     paragraph: () => ({ id: makeBlockId(), type: "paragraph", text: "Write something here…" }),
     link: () => ({ id: makeBlockId(), type: "link", label: "Link text", url: "https://" }),
@@ -119,13 +150,15 @@ const BLOCK_PRESETS: Record<Block["type"], () => Block> = {
 };
 
 export default function App() {
-    const [content, setContent] = useState<SiteContent>(DEFAULT_CONTENT);
-    const [mode, setMode] = useState<EditorMode>("blocks");
-    const [markdownText, setMarkdownText] = useState("");
+    const [content, setContent] = useState<SiteContent>(
+        initialDraft?.content ?? DEFAULT_CONTENT,
+    );
+    const [mode, setMode] = useState<EditorMode>(initialDraft?.mode ?? "blocks");
+    const [markdownText, setMarkdownText] = useState(initialDraft?.markdownText ?? "");
     // HTML mode panes: body markup, stylesheet, script — CodePen-style.
-    const [htmlText, setHtmlText] = useState("");
-    const [cssText, setCssText] = useState("");
-    const [jsText, setJsText] = useState("");
+    const [htmlText, setHtmlText] = useState(initialDraft?.htmlText ?? "");
+    const [cssText, setCssText] = useState(initialDraft?.cssText ?? "");
+    const [jsText, setJsText] = useState(initialDraft?.jsText ?? "");
     const [htmlPane, setHtmlPane] = useState<HtmlPane>("html");
     const [view, setView] = useState<View>("edit");
     const [domain, setDomain] = useState("");
@@ -189,27 +222,107 @@ export default function App() {
         };
     }, [activeAccount?.address]);
 
-    const update = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) =>
+    // Debounced draft autosave — every edit lands in localStorage shortly after.
+    const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
+    const draftRef = useRef(draft);
+    draftRef.current = draft;
+    useEffect(() => {
+        const t = setTimeout(() => {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(draft));
+            } catch {
+                // Storage full/unavailable — autosave is best-effort.
+            }
+        }, 500);
+        return () => clearTimeout(t);
+    }, [mode, content, markdownText, htmlText, cssText, jsText]);
+    // Flush synchronously when the page is leaving/backgrounding, so an edit
+    // made within the debounce window survives a reload or mobile app-switch.
+    useEffect(() => {
+        const flush = () => {
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(draftRef.current));
+            } catch {
+                // best-effort
+            }
+        };
+        const onVisibility = () => {
+            if (document.visibilityState === "hidden") flush();
+        };
+        window.addEventListener("pagehide", flush);
+        document.addEventListener("visibilitychange", onVisibility);
+        return () => {
+            window.removeEventListener("pagehide", flush);
+            document.removeEventListener("visibilitychange", onVisibility);
+        };
+    }, []);
+
+    // Blocks-mode undo: a snapshot stack over SiteContent. Snapshots are taken
+    // OUTSIDE setState updaters (StrictMode double-invokes those) and rapid
+    // keystrokes coalesce into one entry per ~800ms burst.
+    const contentRef = useRef(content);
+    contentRef.current = content;
+    const undoStack = useRef<SiteContent[]>([]);
+    const redoStack = useRef<SiteContent[]>([]);
+    const lastEditAt = useRef(0);
+    const snapshotContent = (force = false) => {
+        const now = Date.now();
+        if (force || now - lastEditAt.current > 800) {
+            undoStack.current.push(contentRef.current);
+            if (undoStack.current.length > 100) undoStack.current.shift();
+        }
+        lastEditAt.current = now;
+        redoStack.current = [];
+    };
+    const undoBlocks = () => {
+        const prev = undoStack.current.pop();
+        if (!prev) return;
+        redoStack.current.push(contentRef.current);
+        lastEditAt.current = 0; // next edit starts a fresh undo group
+        setContent(prev);
+    };
+    const redoBlocks = () => {
+        const next = redoStack.current.pop();
+        if (!next) return;
+        undoStack.current.push(contentRef.current);
+        lastEditAt.current = 0;
+        setContent(next);
+    };
+
+    // Undo/redo for the CodeMirror editor (markdown/html modes), surfaced by
+    // the lazy component once its view mounts.
+    const [editorHandle, setEditorHandle] = useState<EditorHandle | null>(null);
+
+    const update = <K extends keyof SiteContent>(key: K, value: SiteContent[K]) => {
+        snapshotContent();
         setContent((prev) => ({ ...prev, [key]: value }));
-    const updateBlock = (id: string, patcher: (b: Block) => Block) =>
+    };
+    const updateBlock = (id: string, patcher: (b: Block) => Block) => {
+        snapshotContent();
         setContent((prev) => ({
             ...prev,
             blocks: prev.blocks.map((b) => (b.id === id ? patcher(b) : b)),
         }));
-    const removeBlock = (id: string) =>
+    };
+    const removeBlock = (id: string) => {
+        snapshotContent(true);
         setContent((prev) => ({ ...prev, blocks: prev.blocks.filter((b) => b.id !== id) }));
+    };
     const addBlock = (type: Block["type"]) => {
+        snapshotContent(true);
         setContent((prev) => ({ ...prev, blocks: [...prev.blocks, BLOCK_PRESETS[type]()] }));
         setOpenMenu(null);
     };
 
     const applyTemplate = (template: Template) => {
+        snapshotContent(true);
         setUndoPayload({ prior: content, templateName: template.name });
         setContent(template.build());
         setOpenMenu(null);
     };
     const undoTemplate = () => {
         if (!undoPayload) return;
+        snapshotContent(true);
         setContent(undoPayload.prior);
         setUndoPayload(null);
     };
@@ -459,6 +572,7 @@ export default function App() {
                                         ? "Markdown source"
                                         : `${htmlPane.toUpperCase()} source`
                                 }
+                                onHandle={setEditorHandle}
                             />
                         </React.Suspense>
                         </div>
@@ -547,6 +661,23 @@ export default function App() {
             {/* Floating action bar — visible only in edit view; sits above the bottom nav pill. */}
             {isEditing && (
                 <div className="float-bottom">
+                    {/* Undo/redo satellites: same spot in every mode, thumb-zone
+                        reachable, 40px touch targets. */}
+                    <button
+                        className="float-circle"
+                        onClick={
+                            mode === "blocks" ? undoBlocks : () => editorHandle?.undo()
+                        }
+                        disabled={
+                            mode === "blocks"
+                                ? undoStack.current.length === 0
+                                : !editorHandle?.canUndo()
+                        }
+                        title="Undo"
+                        aria-label="Undo"
+                    >
+                        <UndoIcon />
+                    </button>
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
                         {mode === "blocks" && (
                         <div className="tmpl-wrap action-item">
@@ -734,6 +865,21 @@ export default function App() {
                             onSimple={backToSimple}
                         />
                     </div>
+                    <button
+                        className="float-circle"
+                        onClick={
+                            mode === "blocks" ? redoBlocks : () => editorHandle?.redo()
+                        }
+                        disabled={
+                            mode === "blocks"
+                                ? redoStack.current.length === 0
+                                : !editorHandle?.canRedo()
+                        }
+                        title="Redo"
+                        aria-label="Redo"
+                    >
+                        <RedoIcon />
+                    </button>
                 </div>
             )}
 
@@ -1453,6 +1599,22 @@ function Row({
 }
 
 // Inline SVG icons. Lightweight, no dep.
+function UndoIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 7v6h6" />
+            <path d="M21 17a9 9 0 0 0-15-6.7L3 13" />
+        </svg>
+    );
+}
+function RedoIcon() {
+    return (
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 7v6h-6" />
+            <path d="M3 17a9 9 0 0 1 15-6.7L21 13" />
+        </svg>
+    );
+}
 function PaletteIcon() {
     return (
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
