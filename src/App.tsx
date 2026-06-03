@@ -38,6 +38,7 @@ import {
     MAX_TX_BYTES,
     storeBytes,
 } from "./lib/bulletin/store.ts";
+import { DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
@@ -562,7 +563,7 @@ export default function App() {
         background: content.background,
         fontFamily: content.fontFamily,
         fontSize: content.fontSize ?? DEFAULT_FONT_SIZE,
-        textAlign: content.align ?? "left",
+        textAlign: content.align,
         color: foreground,
         "--site-foreground": foreground,
         "--site-divider": colors.divider,
@@ -1002,7 +1003,7 @@ export default function App() {
                     <div className="deploy-field">
                         <span className="field-label">URL</span>
                         <span className="url-preview">
-                            {`https://${domain || "<auto>"}.dot.li`}
+                            {`https://${domain || "<auto>"}.${DOT_HOST}`}
                         </span>
                     </div>
 
@@ -1049,9 +1050,9 @@ export default function App() {
                             ) : result.kind === "stored" ? (
                                 <div className="result-note">
                                     <p>
-                                        Stored on Bulletin ✓. The <code>.dot.li</code>{" "}
-                                        mapping step failed. Bytes still retrievable via
-                                        the gateway link.
+                                        Stored on Bulletin ✓. The{" "}
+                                        <code>.{DOT_HOST}</code> mapping step failed.
+                                        Bytes still retrievable via the gateway link.
                                     </p>
                                     {result.dotError && (
                                         <pre className="error-block">
@@ -1739,12 +1740,8 @@ function DotErrorHint({ message }: { message: string }) {
             <p className="hint">
                 <strong>Likely cause:</strong> //Bob has no PAS on Asset Hub Next to
                 pay contract fees. Hit the{" "}
-                <a
-                    href="https://faucet.polkadot.io/?parachain=1500"
-                    target="_blank"
-                    rel="noopener"
-                >
-                    Paseo Asset Hub Next faucet
+                <a href={PAS_FAUCET_URL} target="_blank" rel="noopener">
+                    Asset Hub faucet
                 </a>{" "}
                 (paste //Bob's address:{" "}
                 <code>5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty</code>) and

@@ -12,7 +12,7 @@ import { computeCID } from "./lib/bulletin/cid.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { registerDomain, checkDomainAvailability } from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
-import { BULLETIN_GATEWAY } from "./lib/polkadot/constants.ts";
+import { BULLETIN_GATEWAY, DOT_HOST } from "./lib/polkadot/constants.ts";
 import type { ActiveAccount } from "./account.ts";
 
 export interface DeployPreview {
@@ -77,7 +77,7 @@ export async function previewDeploy(html: string, domain: string | null): Promis
         bytes: bytes.length,
         cid,
         domain: finalDomain,
-        url: `https://${finalDomain}.dot.li`,
+        url: `https://${finalDomain}.${DOT_HOST}`,
         gatewayUrl: `${BULLETIN_GATEWAY}${cid}`,
     };
 }
@@ -148,7 +148,7 @@ export async function deployFull(
         bytes: stored.bytes,
         cid: stored.cid,
         domain: finalLabel,
-        url: `https://${finalLabel}.dot.li`,
+        url: `https://${finalLabel}.${DOT_HOST}`,
         gatewayUrl: stored.ipfsUrl,
         blockHash: stored.blockHash,
         blockNumber: stored.blockNumber,

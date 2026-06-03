@@ -1,0 +1,42 @@
+{
+    "$comment": "Top-level network config — the test networks this app can target. Values are a subset of bulletin-deploy/assets/environments.json (the source of truth); re-sync from there when backends change. Switch networks by changing `active`.",
+    "active": "paseo-next-v2",
+    "networks": {
+        "paseo-next-v2": {
+            "name": "Paseo Next v2",
+            "description": "Next iteration of the Paseo Next testnet",
+            "bulletinRpc": "wss://paseo-bulletin-next-rpc.polkadot.io",
+            "assetHubRpc": "wss://paseo-asset-hub-next-rpc.polkadot.io",
+            "ipfsGateway": "https://paseo-bulletin-next-ipfs.polkadot.io",
+            "dotHost": "dot.li",
+            "nativeToEthRatio": 100000000,
+            "bulletinFaucetUrl": "https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet",
+            "pasFaucetUrl": "https://faucet.polkadot.io/?parachain=1500",
+            "contracts": {
+                "registry": "0xa1b2b939E82b2ecE55Bd8a0E283818BfC1CA6CDc",
+                "registrar": "0xf7Ad3F44F316C73E4a2b46b1ed48d376bCc9E639",
+                "registrarController": "0x674b705268DAE369F0a7BE9cbaCDb928b8BA38C2",
+                "contentResolver": "0x8A26480b0B5Df3d4D9b95adc24a5Ecb33A5b8F64",
+                "popRules": "0x4909bFb3f4Fd86244abD6430fDfA0Ce5C91aD0c4"
+            }
+        },
+        "preview": {
+            "name": "Preview",
+            "description": "Product Preview net, used by Product Teams",
+            "bulletinRpc": "wss://previewnet.substrate.dev/bulletin",
+            "assetHubRpc": "wss://previewnet.substrate.dev/asset-hub",
+            "ipfsGateway": "https://previewnet.substrate.dev",
+            "dotHost": "dot.li",
+            "nativeToEthRatio": 100000000,
+            "bulletinFaucetUrl": "https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet",
+            "pasFaucetUrl": "https://faucet.polkadot.io/",
+            "contracts": {
+                "registry": "0x5622CA75C75726Da13ae46C69127C07c87538633",
+                "registrar": "0x061273AeF34e8ab9Ca08E199d7440E2639Fc2088",
+                "registrarController": "0xC0c21ca6302884572E61d69D5bf3E271Acf39B23",
+                "contentResolver": "0xBD003d5Dd04E68aC60d529a46AEfBdEf8941868C",
+                "popRules": "0xF209a15e8a10D208bb4d3e3c56D9EB73a5934C26"
+            }
+        }
+    }
+}

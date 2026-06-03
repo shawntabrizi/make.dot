@@ -135,6 +135,15 @@ function safeUrl(raw: string): string {
     return "#";
 }
 
+// Images additionally accept data:image/* — safe in an <img> src and in the
+// spirit of self-contained pages. Links stay http(s)-only (data: hrefs are a
+// phishing vector).
+function safeImageUrl(raw: string): string {
+    const v = raw.trim();
+    if (/^data:image\//i.test(v)) return escapeHtml(v);
+    return safeUrl(v);
+}
+
 function renderBlock(block: Block): string {
     switch (block.type) {
         case "heading":
@@ -153,7 +162,7 @@ function renderBlock(block: Block): string {
                 ...(shape !== "rounded" ? [`img-${shape}`] : []),
             ];
             const cls = classes.length ? ` class="${classes.join(" ")}"` : "";
-            return `<img${cls} src="${safeUrl(block.url)}" alt="${escapeHtml(block.alt)}">`;
+            return `<img${cls} src="${safeImageUrl(block.url)}" alt="${escapeHtml(block.alt)}">`;
         }
         case "divider":
             return `<hr>`;
@@ -206,10 +215,10 @@ pre code { background: none; padding: 0; }`,
     border-radius: 50%;
 }`,
     "img-square": () => `img.img-square { border-radius: 0; }`,
-    pill: ({ accent, accentContrast }) => `p.pill { text-align: center; margin: 20px 0; }
+    pill: ({ accent, accentContrast }) => `p.pill { margin: 16px 0; }
 p.pill a {
-    display: inline-block;
-    min-width: 200px;
+    display: block;
+    text-align: center;
     padding: 14px 24px;
     background: ${accent};
     color: ${accentContrast};
@@ -260,6 +269,7 @@ a:hover { opacity: 0.8; }
 img { display: block; max-width: 100%; height: auto; border-radius: 12px; margin: 16px auto; }
 hr { border: 0; border-top: 1px solid ${colors.divider}; margin: 32px 0; }
 footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
+@media (max-width: 600px) { body { padding: 64px 16px; } }
 ${featureCss}`;
 }
 

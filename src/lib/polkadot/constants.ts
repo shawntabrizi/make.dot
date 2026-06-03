@@ -1,28 +1,53 @@
-// paseo-next-v2 endpoints + DotNS contract addresses.
-// Sources:
-//   - playground-cli/src/config.ts (RPCs + gateway)
-//   - bulletin-deploy/assets/environments.json (DotNS contract addresses)
+// All network endpoints and contract addresses come from /networks.json —
+// the top-level config for the test networks this app can target. Switch
+// networks by changing its `active` field; re-sync values from
+// bulletin-deploy/assets/environments.json when backends change.
 
-export const BULLETIN_RPC = "wss://paseo-bulletin-next-rpc.polkadot.io";
-export const BULLETIN_GATEWAY = "https://paseo-bulletin-next-ipfs.polkadot.io/ipfs/";
+import networksConfig from "../../../networks.json";
 
-export const ASSET_HUB_RPC = "wss://paseo-asset-hub-next-rpc.polkadot.io";
+export interface NetworkConfig {
+    name: string;
+    description: string;
+    bulletinRpc: string;
+    assetHubRpc: string;
+    ipfsGateway: string;
+    dotHost: string;
+    nativeToEthRatio: number;
+    bulletinFaucetUrl: string;
+    pasFaucetUrl: string;
+    contracts: {
+        registry: string;
+        registrar: string;
+        registrarController: string;
+        contentResolver: string;
+        popRules: string;
+    };
+}
 
-// DotNS deployed contract addresses on paseo-next-v2's Asset Hub.
-export const DOTNS_CONTRACTS = {
-    registry: "0x8877344A885682523B4613779C95688ed7037BfD",
-    registrar: "0x885b8085bA92A31c4ef52076f77379E647ECC399",
-    registrarController: "0x320b72c6e70D5a631d835FfD95915B288b26E6Be",
-    contentResolver: "0x2c9FF5D9136DBE5814C7B4FDbeDC15273a776663",
-    popRules: "0x2002C1c15b88632Ad01c7770f6EbE1Ca05c8472E",
-} as const;
+const networks: Record<string, NetworkConfig> = networksConfig.networks;
+export const NETWORK: NetworkConfig = networks[networksConfig.active];
+if (!NETWORK) {
+    throw new Error(
+        `networks.json: active network "${networksConfig.active}" is not defined`,
+    );
+}
 
-/** 1 PAS (native, 12 decimals) = 1_000_000 Wei (EVM, 18 decimals). */
-export const NATIVE_TO_ETH_RATIO = 1_000_000n;
+export const BULLETIN_RPC = NETWORK.bulletinRpc;
+export const BULLETIN_GATEWAY = `${NETWORK.ipfsGateway}/ipfs/`;
 
-/** Self-serve faucet for Bulletin storage authorization on Paseo. */
-export const BULLETIN_FAUCET_URL =
-    "https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet";
+export const ASSET_HUB_RPC = NETWORK.assetHubRpc;
 
-/** PAS faucet for paying contract fees on Asset Hub Next. */
-export const PAS_FAUCET_URL = "https://faucet.polkadot.io/";
+/** Host suffix where DotNS names resolve (e.g. `<name>.dot.li`). */
+export const DOT_HOST = NETWORK.dotHost;
+
+/** DotNS deployed contract addresses on the active network's Asset Hub. */
+export const DOTNS_CONTRACTS = NETWORK.contracts;
+
+/** Native-token base units → EVM Wei (18 decimals) conversion factor. */
+export const NATIVE_TO_ETH_RATIO = BigInt(NETWORK.nativeToEthRatio);
+
+/** Self-serve faucet for Bulletin storage authorization. */
+export const BULLETIN_FAUCET_URL = NETWORK.bulletinFaucetUrl;
+
+/** Faucet for native tokens to pay contract fees on Asset Hub. */
+export const PAS_FAUCET_URL = NETWORK.pasFaucetUrl;
