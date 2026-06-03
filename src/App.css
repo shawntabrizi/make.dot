@@ -285,22 +285,35 @@ body {
     clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
 
-.action-select {
-    height: 28px;
-    background: rgba(0,0,0,0.4);
+.font-wrap { position: relative; }
+.font-btn { font-size: 12px; font-weight: 600; }
+.font-menu {
+    position: absolute;
+    bottom: 100%; left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 8px;
+    min-width: 140px;
+    background: var(--chrome-surface);
     border: 1px solid var(--chrome-border);
-    border-radius: 999px;
-    color: var(--chrome-text);
-    padding: 0 24px 0 10px;
-    font: inherit;
-    font-size: 12px;
-    cursor: pointer;
-    appearance: none;
-    background-image: linear-gradient(45deg, transparent 50%, rgba(255,255,255,0.5) 50%), linear-gradient(135deg, rgba(255,255,255,0.5) 50%, transparent 50%);
-    background-position: calc(100% - 11px) 12px, calc(100% - 7px) 12px;
-    background-size: 4px 4px;
-    background-repeat: no-repeat;
+    border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    overflow: hidden;
+    z-index: 30;
 }
+.font-menu button {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    background: transparent;
+    border: 0;
+    color: var(--chrome-text);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+}
+.font-menu button:hover { background: rgba(255,255,255,0.05); }
+.font-menu button.is-active { background: rgba(255,255,255,0.1); }
 
 .action-btn {
     width: 28px; height: 28px;
@@ -318,6 +331,20 @@ body {
     transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 .action-btn:hover { border-color: rgba(255,255,255,0.3); }
+
+/* Subtitle under each action-bar control — mirrors .nav-tab-label */
+.action-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+}
+.action-label {
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--chrome-text2);
+}
 
 .add-wrap { position: relative; }
 .add-menu {
@@ -703,7 +730,6 @@ body {
     .site { padding: 64px 16px 160px; }
     .float-bottom { bottom: calc(72px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px)); }
     .action-bar { padding: 5px; gap: 6px; }
-    .action-select { display: none; }
     .deploy-panel {
         width: calc(100% - 16px);
         bottom: calc(80px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));

@@ -100,6 +100,7 @@ export default function App() {
     const [deployError, setDeployError] = useState<string | null>(null);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const [templatesMenuOpen, setTemplatesMenuOpen] = useState(false);
+    const [fontMenuOpen, setFontMenuOpen] = useState(false);
     const [undoPayload, setUndoPayload] = useState<{
         prior: SiteContent;
         templateName: string;
@@ -374,7 +375,7 @@ export default function App() {
             {isEditing && (
                 <div className="float-bottom">
                     <div className="action-bar" role="toolbar" aria-label="Site styling">
-                        <div className="tmpl-wrap">
+                        <div className="tmpl-wrap action-item">
                             <button
                                 className="action-btn"
                                 onClick={() => setTemplatesMenuOpen((v) => !v)}
@@ -409,6 +410,9 @@ export default function App() {
                                     ))}
                                 </div>
                             )}
+                            <span className="action-label" aria-hidden="true">
+                                Layout
+                            </span>
                         </div>
                         <ColorSwatch
                             label="Accent"
@@ -420,19 +424,43 @@ export default function App() {
                             value={content.background}
                             onChange={(v) => update("background", v)}
                         />
-                        <select
-                            className="action-select"
-                            value={content.fontFamily}
-                            onChange={(e) => update("fontFamily", e.target.value)}
-                            aria-label="Font family"
-                        >
-                            {FONT_OPTIONS.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                </option>
-                            ))}
-                        </select>
-                        <div className="add-wrap">
+                        <div className="font-wrap action-item">
+                            <button
+                                className="action-btn font-btn"
+                                onClick={() => setFontMenuOpen((v) => !v)}
+                                aria-haspopup="menu"
+                                aria-expanded={fontMenuOpen}
+                                title="Font family"
+                            >
+                                Aa
+                            </button>
+                            {fontMenuOpen && (
+                                <div className="font-menu" role="menu">
+                                    {FONT_OPTIONS.map((opt) => (
+                                        <button
+                                            key={opt.value}
+                                            role="menuitem"
+                                            className={
+                                                content.fontFamily === opt.value
+                                                    ? "is-active"
+                                                    : ""
+                                            }
+                                            style={{ fontFamily: opt.value }}
+                                            onClick={() => {
+                                                update("fontFamily", opt.value);
+                                                setFontMenuOpen(false);
+                                            }}
+                                        >
+                                            {opt.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                            <span className="action-label" aria-hidden="true">
+                                Font
+                            </span>
+                        </div>
+                        <div className="add-wrap action-item">
                             <button
                                 className="action-btn"
                                 onClick={() => setAddMenuOpen((v) => !v)}
@@ -452,6 +480,9 @@ export default function App() {
                                     <button onClick={() => addBlock("divider")}>Divider</button>
                                 </div>
                             )}
+                            <span className="action-label" aria-hidden="true">
+                                Add
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -712,19 +743,24 @@ function ColorSwatch({
     onChange: (next: string) => void;
 }) {
     return (
-        <label
-            className="swatch"
-            title={`${label}: ${value}`}
-            style={{ background: value }}
-        >
-            <span className="sr-only">{label}</span>
-            <input
-                type="color"
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                aria-label={`${label} color`}
-            />
-        </label>
+        <div className="action-item">
+            <label
+                className="swatch"
+                title={`${label}: ${value}`}
+                style={{ background: value }}
+            >
+                <span className="sr-only">{label}</span>
+                <input
+                    type="color"
+                    value={value}
+                    onChange={(e) => onChange(e.target.value)}
+                    aria-label={`${label} color`}
+                />
+            </label>
+            <span className="action-label" aria-hidden="true">
+                {label}
+            </span>
+        </div>
     );
 }
 
