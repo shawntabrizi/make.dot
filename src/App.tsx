@@ -21,8 +21,13 @@ import {
     type SiteContent,
     type TextAlign,
 } from "./template.ts";
-import { deployFull, deriveDomain, type DeploySuccess } from "./deploy.ts";
-import { runPreflight, type PreflightReport } from "./preflight.ts";
+// Chain-stack modules (deploy/preflight/store pull polkadot-api, viem,
+// descriptors metadata, multiformats — ~1.5 MB) are loaded on demand at
+// their call sites via dynamic import(); only their TYPES are imported
+// statically (erased at compile time).
+import type { DeploySuccess } from "./deploy.ts";
+import type { PreflightReport } from "./preflight.ts";
+import { deriveDomain } from "./derive-domain.ts";
 import { signInToHost, useHostState } from "./signer.ts";
 import { ensureHostPermission } from "./lib/host/permissions.ts";
 import {
@@ -32,11 +37,7 @@ import {
     resolveHostAccount,
     tryExtensionAccount,
 } from "./account.ts";
-import {
-    checkBulletinAuthorization,
-    MAX_TX_BYTES,
-    storeBytes,
-} from "./lib/bulletin/store.ts";
+import { MAX_TX_BYTES } from "./lib/bulletin/limits.ts";
 import { DOT_HOST, PAS_FAUCET_URL } from "./lib/polkadot/constants.ts";
 import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
@@ -295,7 +296,8 @@ export default function App() {
             return;
         }
         let cancelled = false;
-        checkBulletinAuthorization(address)
+        import("./lib/bulletin/store.ts")
+            .then(({ checkBulletinAuthorization }) => checkBulletinAuthorization(address))
             .then((auth) => {
                 if (cancelled) return;
                 const remaining = auth.bytesAllowance - auth.bytesUsed;
@@ -348,11 +350,14 @@ export default function App() {
         setResult(null); // inputs changed — a previous deploy result is stale
         setConfirmArmed(false); // …and so is an armed "deploy anyway"
         const t = setTimeout(() => {
-            runPreflight({
-                html: currentHtml(),
-                label: effectiveLabel,
-                account: activeAccount,
-            })
+            import("./preflight.ts")
+                .then(({ runPreflight }) =>
+                    runPreflight({
+                        html: currentHtml(),
+                        label: effectiveLabel,
+                        account: activeAccount,
+                    }),
+                )
                 .then((report) => {
                     if (!cancelled) setPreflight(report);
                 })
@@ -594,6 +599,7 @@ export default function App() {
                     : "Uploading to Bulletin…",
             );
             try {
+                const { storeBytes } = await import("./lib/bulletin/store.ts");
                 const stored = await storeBytes({
                     bytes,
                     signer: activeAccount.signer,
@@ -681,6 +687,7 @@ export default function App() {
             if (activeAccount.source === "host") {
                 await ensureHostPermission("ChainSubmit");
             }
+            const { deployFull } = await import("./deploy.ts");
             const stored = await deployFull(
                 currentHtml(),
                 effectiveLabel,
