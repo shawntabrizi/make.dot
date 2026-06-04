@@ -61,8 +61,17 @@ export const TEMPLATES: readonly Template[] = [
                     type: "paragraph",
                     text: "What you do, in one line.",
                 },
-                { id: id(), type: "link", variant: "pill", label: "Twitter", url: "https://" },
-                { id: id(), type: "link", variant: "pill", label: "GitHub", url: "https://" },
+                // Prefilled to the profile-URL base — the user just appends
+                // their username. "X" matches the platform's current name
+                // (and what Linktree calls it).
+                { id: id(), type: "link", variant: "pill", label: "X", url: "https://x.com/" },
+                {
+                    id: id(),
+                    type: "link",
+                    variant: "pill",
+                    label: "GitHub",
+                    url: "https://github.com/",
+                },
                 { id: id(), type: "link", variant: "pill", label: "Email me", url: "mailto:" },
             ],
         }),
