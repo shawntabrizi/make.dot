@@ -16,7 +16,7 @@ import { createDevSigner, getDevPublicKey } from "@parity/product-sdk-tx";
 import { connectInjectedExtension, getInjectedExtensions } from "polkadot-api/pjs-signer";
 import type { PolkadotSigner } from "polkadot-api";
 import { isInHost } from "./lib/host/detect.ts";
-import { signerManager } from "./signer.ts";
+import { connectHostAccount, getHostState } from "./signer.ts";
 
 export type AccountSource = "host" | "extension" | "dev";
 
@@ -44,23 +44,23 @@ export function getDevAccount(): ActiveAccount {
 }
 
 /**
- * Resolve the Host API account (Polkadot Desktop / Mobile). Returns null if
- * the host isn't available — the signer wrapper transitions to `disconnected`
- * in that case.
+ * Resolve the Host API product account (Polkadot Desktop / Mobile). Returns
+ * null when the host isn't available, errored, or has no dotli session —
+ * inspect the signer wrapper's HostState (`useHostState`) to tell
+ * "signed-out" (show a sign-in CTA) apart from "no host at all".
  */
 export async function tryHostAccount(): Promise<ActiveAccount | null> {
-    const result = await signerManager.connect();
-    if (!result.ok) return null;
-    const state = signerManager.getState();
-    const account = state.selectedAccount;
-    if (!account) return null;
+    const state = await connectHostAccount();
+    if (state.status !== "ready" || !state.account) return null;
     return {
         source: "host",
-        address: account.address,
-        displayName: account.name ?? truncateAddress(account.address),
-        // SignerAccount.getSigner() IS a PAPI PolkadotSigner (product-sdk
-        // routes it through host_create_transaction) — no adapter needed.
-        signer: account.getSigner(),
+        address: state.account.address,
+        displayName:
+            state.account.displayName ?? truncateAddress(state.account.address),
+        // The createTransaction product signer IS a PAPI PolkadotSigner —
+        // routed via host_create_transaction, so AH-Next's custom signed
+        // extensions pass through as raw bytes.
+        signer: state.account.signer,
     };
 }
 
@@ -77,6 +77,9 @@ export async function resolveHostAccount(): Promise<ActiveAccount | null> {
     for (let i = 0; i < attempts; i++) {
         const account = await tryHostAccount();
         if (account) return account;
+        // Definitive "signed out" needs user action (signInToHost) —
+        // retrying won't change it.
+        if (getHostState().status === "signed-out") return null;
         if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500));
     }
     return null;

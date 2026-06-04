@@ -10,6 +10,8 @@ export interface NetworkConfig {
     description: string;
     bulletinRpc: string;
     assetHubRpc: string;
+    /** AH genesis hash — enables host-routed providers; WS fallback if absent. */
+    assetHubGenesis?: string;
     ipfsGateway: string;
     dotHost: string;
     nativeToEthRatio: number;

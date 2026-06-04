@@ -7,6 +7,7 @@
             "description": "Next iteration of the Paseo Next testnet",
             "bulletinRpc": "wss://paseo-bulletin-next-rpc.polkadot.io",
             "assetHubRpc": "wss://paseo-asset-hub-next-rpc.polkadot.io",
+            "assetHubGenesis": "0x173cea9df45656cf612c8b8ece56e04e9a693c69cfaac47d3628dae735067af8",
             "ipfsGateway": "https://paseo-bulletin-next-ipfs.polkadot.io",
             "dotHost": "dot.li",
             "nativeToEthRatio": 100000000,

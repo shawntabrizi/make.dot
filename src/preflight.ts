@@ -48,13 +48,6 @@ export interface PreflightReport {
     priceNative: bigint | null;
 }
 
-/**
- * Outcome tag of the host's SmartContractAllowance grant ("Allocated" /
- * "Rejected" / "NotAvailable"), when source==="host". Null while pending —
- * kept as a plain string so the SDK's tag union can widen without breaking us.
- */
-export type ContractAllowanceOutcome = string | null;
-
 // 12-decimals per the 2 PAS == 2_000_000_000_000 convention in contracts.ts.
 const PAS = 1_000_000_000_000n;
 // Rough headroom for fees + the two contract storage deposits. Deliberately
@@ -93,9 +86,8 @@ export async function runPreflight(params: {
     html: string;
     label: string;
     account: ActiveAccount;
-    contractAllowance: ContractAllowanceOutcome;
 }): Promise<PreflightReport> {
-    const { html, label, account, contractAllowance } = params;
+    const { html, label, account } = params;
 
     const bytes = new TextEncoder().encode(html);
     const cid = computeCID(bytes).toString();
@@ -196,24 +188,14 @@ export async function runPreflight(params: {
     let freeNative: bigint | null = null;
     const fundsCheck = async (): Promise<PreflightCheck> => {
         if (account.source === "host") {
-            // Host-sponsored fees (RFC-0006): the grant outcome is the check.
-            if (contractAllowance === "Allocated") {
-                return {
-                    id: "funds",
-                    label: "Transaction fees",
-                    state: "ok",
-                    detail: "Sponsored by the host (SmartContractAllowance granted)",
-                    link: null,
-                };
-            }
+            // Host-mediated transactions are fee-sponsored (AsPgas) — the
+            // ChainSubmit permission prompt at deploy time is the real gate,
+            // and there's no API to pre-query it.
             return {
                 id: "funds",
                 label: "Transaction fees",
-                state: contractAllowance === "Rejected" ? "fail" : "warn",
-                detail:
-                    contractAllowance === "Rejected"
-                        ? "Host declined the smart-contract allowance — fees can't be paid"
-                        : "Smart-contract allowance not confirmed yet — deploy may prompt or fail",
+                state: "ok",
+                detail: "Sponsored by the host",
                 link: null,
             };
         }

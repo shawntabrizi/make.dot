@@ -24,15 +24,14 @@
     "@codemirror/view": "^6.43.0",
     "@ensdomains/content-hash": "^3.0.0",
     "@noble/hashes": "^1.4.0",
-    "@novasamatech/host-api": "0.7.8",
+    "@novasamatech/host-api": "0.7.9-4",
+    "@novasamatech/product-sdk": "0.7.9-4",
     "@parity/product-sdk-address": "^0.1.1",
     "@parity/product-sdk-contracts": "^0.4.0",
     "@parity/product-sdk-crypto": "^0.1.1",
     "@parity/product-sdk-descriptors": "^0.4.0",
-    "@parity/product-sdk-host": "0.5.0",
     "@parity/product-sdk-keys": "0.3.1",
     "@parity/product-sdk-logger": "^0.1.1",
-    "@parity/product-sdk-signer": "0.4.0",
     "@parity/product-sdk-storage": "^0.1.1",
     "@parity/product-sdk-tx": "0.2.5",
     "@parity/product-sdk-utils": "^0.1.1",
@@ -44,9 +43,10 @@
     "react-dom": "^19.0.0",
     "viem": "^2.49.3"
   },
-  "_comment_overrides": "host-api pinned to one version everywhere (product-sdk-host@0.5 needs >=0.6.0; 0.7.8 is the newest that clears the npm `before` pin); @polkadot-api/json-rpc-provider is the standard upstream workaround. signer@0.4.0 is the newest pre-pin version with the createTransaction signer type (survives AuthorizeValueTransfer on AH-next).",
+  "_comment_overrides": "novasama product-sdk + host-api pinned in lockstep at 0.7.9-4 (the Rock-Paper-Scissors reference combo — its createAccountsProvider path is what current mobile/desktop hosts accept; @parity/product-sdk-signer's SignerManager is avoided because getLegacyAccounts is rejected by those hosts). @polkadot-api/json-rpc-provider is the standard upstream workaround.",
   "overrides": {
-    "@novasamatech/host-api": "0.7.8",
+    "@novasamatech/host-api": "0.7.9-4",
+    "@novasamatech/product-sdk": "0.7.9-4",
     "@polkadot-api/json-rpc-provider": "^0.2.0"
   },
   "devDependencies": {

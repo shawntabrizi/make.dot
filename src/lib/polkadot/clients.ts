@@ -1,19 +1,34 @@
 // Cached PAPI clients for Bulletin Chain and Asset Hub Next.
 //
-// Both use direct WebSocket today (standalone mode). Host-routed providers
-// via `createPapiProvider(genesisHash)` are a follow-up — that path needs the
-// AH-Next genesis hash and `isInHost()` guards from the polkadot-triangle
-// skill. For the //Bob deploy path (which is always standalone) this is fine.
+// Asset Hub routes through the host (`createPapiProvider` with WS fallback)
+// when running as a deployed app inside Polkadot Desktop/Mobile — the host
+// owns the chain follow there, so signing/permissions stay coordinated
+// (Rock-Paper-Scissors / t3rminal pattern). Dev/localhost bypasses straight
+// to WS: the host refuses to open a follow for unregistered domains even
+// though `host_feature_supported` reports true, so the provider would trap
+// without the fallback ever firing. Bulletin stays direct WS everywhere —
+// hosts don't follow Bulletin (yet).
 
 import { createClient, type TypedApi } from "polkadot-api";
 import { getWsProvider } from "polkadot-api/ws";
+import { createPapiProvider } from "@novasamatech/product-sdk";
+import { isInHost } from "../host/detect.ts";
 // Locally-generated descriptors via `papi add` against the live chains.
 // The pre-published `@parity/product-sdk-descriptors` package is too stale for
 // the v2 runtime — runtime-API entry hashes mismatch, producing
 // "Incompatible runtime entry RuntimeCall(ReviveApi_call)" at dry-run time.
 // Re-generate via `npx papi generate` whenever the chain's runtime upgrades.
 import { bulletin, pah } from "@polkadot-api/descriptors";
-import { ASSET_HUB_RPC, BULLETIN_RPC } from "./constants.ts";
+import { ASSET_HUB_RPC, BULLETIN_RPC, NETWORK } from "./constants.ts";
+
+function assetHubProvider() {
+    const ws = getWsProvider(ASSET_HUB_RPC);
+    const genesis = NETWORK.assetHubGenesis;
+    const isDevHost =
+        typeof window !== "undefined" && /^localhost(:\d+)?$/.test(window.location.host);
+    if (!genesis || isDevHost || !isInHost()) return ws;
+    return createPapiProvider(genesis as `0x${string}`, ws);
+}
 
 type BulletinApi = TypedApi<typeof bulletin>;
 type AssetHubApi = TypedApi<typeof pah>;
@@ -40,7 +55,7 @@ export function getAssetHubClient(): {
     unsafeApi: ReturnType<Client["getUnsafeApi"]>;
 } {
     if (!assetHubClient) {
-        assetHubClient = createClient(getWsProvider(ASSET_HUB_RPC));
+        assetHubClient = createClient(assetHubProvider());
         assetHubApi = assetHubClient.getTypedApi(pah);
         assetHubUnsafeApi = assetHubClient.getUnsafeApi();
     }

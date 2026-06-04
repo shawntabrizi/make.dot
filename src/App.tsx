@@ -22,7 +22,7 @@ import {
 } from "./template.ts";
 import { deployFull, deriveDomain, type DeploySuccess } from "./deploy.ts";
 import { runPreflight, type PreflightReport } from "./preflight.ts";
-import { useResourceAllocationState } from "./signer.ts";
+import { ensureChainSubmitPermission, signInToHost, useHostState } from "./signer.ts";
 import {
     type ActiveAccount,
     getDevAccount,
@@ -247,13 +247,30 @@ export default function App() {
         };
     }, []);
 
-    // Host resource grants (BulletinAllowance etc.) — requested in the
-    // background at connect; the SmartContractAllowance outcome feeds the
-    // pre-flight fee check.
-    const resourceAllocation = useResourceAllocationState();
-    const contractAllowance =
-        resourceAllocation.entries.find((e) => e.resource === "SmartContractAllowance")
-            ?.outcome ?? null;
+    // Host session state — distinguishes "no host" from "host present but
+    // signed out of dotli" (the latter gets a sign-in CTA).
+    const hostState = useHostState();
+    const hostSignedOut = hostState.status === "signed-out";
+    const handleHostSignIn = async () => {
+        setOwnedError(null);
+        setResolvingOwned(true);
+        try {
+            const state = await signInToHost();
+            const account = state.account;
+            if (state.status === "ready" && account) {
+                setHostAccount({
+                    source: "host",
+                    address: account.address,
+                    displayName: account.displayName ?? account.address,
+                    signer: account.signer,
+                });
+            }
+        } catch (cause) {
+            setOwnedError(cause instanceof Error ? cause.message : String(cause));
+        } finally {
+            setResolvingOwned(false);
+        }
+    };
 
     useEffect(() => {
         const address = activeAccount?.address;
@@ -319,7 +336,6 @@ export default function App() {
                 html: currentHtml(),
                 label: effectiveLabel,
                 account: activeAccount,
-                contractAllowance,
             })
                 .then((report) => {
                     if (!cancelled) setPreflight(report);
@@ -337,7 +353,7 @@ export default function App() {
         };
         // currentHtml is stable for a given content/mode; content edits can
         // only happen in the edit view, so the `view` dep re-checks on return.
-    }, [view, effectiveLabel, activeAccount, contractAllowance]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [view, effectiveLabel, activeAccount]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -549,6 +565,10 @@ export default function App() {
             activeAccount.source === "host"
                 ? Math.min(chainLimit, HOST_SIGN_BUDGET)
                 : chainLimit;
+        // RFC-0002: host-mediated submission needs ChainSubmit granted.
+        if (activeAccount.source === "host") {
+            await ensureChainSubmitPermission();
+        }
         for (;;) {
             onStatus("Optimizing image…");
             const resized = await resizeImageToFit(file, Math.floor(budget * 0.95));
@@ -638,6 +658,10 @@ export default function App() {
             if (!activeAccount || !effectiveLabel) {
                 throw new Error("No account connected or no name resolved");
             }
+            // RFC-0002: host-mediated submission needs ChainSubmit granted.
+            if (activeAccount.source === "host") {
+                await ensureChainSubmitPermission();
+            }
             const stored = await deployFull(
                 currentHtml(),
                 effectiveLabel,
@@ -683,7 +707,11 @@ export default function App() {
         }
     };
     const showOwnedHint =
-        !useDevAccount && !hostAccount && !extensionAccount && !resolvingOwned;
+        !useDevAccount &&
+        !hostAccount &&
+        !extensionAccount &&
+        !resolvingOwned &&
+        !hostSignedOut; // signed-out gets the sign-in CTA instead
 
     const colors = siteColors(content.background);
     const foreground = content.textColor ?? colors.foreground;
@@ -1096,7 +1124,16 @@ export default function App() {
                                 </span>
                             </button>
                         )}
-                        {!useDevAccount && !hostAccount && !extensionAccount && (
+                        {!useDevAccount && !activeAccount && hostSignedOut && (
+                            <button
+                                className="pill pill-secondary"
+                                onClick={handleHostSignIn}
+                                disabled={resolvingOwned || busy}
+                            >
+                                Sign in to Polkadot
+                            </button>
+                        )}
+                        {!useDevAccount && !hostAccount && !extensionAccount && !hostSignedOut && (
                             <button
                                 className="pill pill-secondary"
                                 onClick={connectExtension}
