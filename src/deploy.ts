@@ -71,8 +71,9 @@ export async function deployFull(
             onStatus: (s) => onStatus(`Bulletin: ${s}`),
         });
     };
-    const waitCommitmentAge = async (seconds: number) => {
+    const waitCommitmentAge = async (seconds: number, isCancelled: () => boolean) => {
         for (let remaining = seconds; remaining > 0; remaining--) {
+            if (isCancelled()) return;
             onStatus(`DotNS register: Waiting ${remaining}s for commitment age…`);
             await new Promise((r) => setTimeout(r, 1000));
         }
@@ -142,10 +143,20 @@ export async function deployFull(
     // failure (same contract as before) — the spent commitment expires
     // harmlessly on-chain.
     if (commitment) {
-        [, stored] = await Promise.all([
-            waitCommitmentAge(commitment.totalWait),
-            doStore(),
-        ]);
+        // If the store rejects, Promise.all ABANDONS the wait rather than
+        // cancelling it — without the flag, the orphaned loop keeps firing
+        // status updates for up to ~66s, stomping the progress UI of any
+        // retry the user starts. The finally flips the flag on every exit
+        // path; the abandoned loop notices at its next 1s tick.
+        let settled = false;
+        try {
+            [, stored] = await Promise.all([
+                waitCommitmentAge(commitment.totalWait, () => settled),
+                doStore(),
+            ]);
+        } finally {
+            settled = true;
+        }
     } else {
         stored = await doStore();
     }
