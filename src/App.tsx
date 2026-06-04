@@ -155,6 +155,41 @@ interface Draft {
     jsText: string;
 }
 
+// localStorage is user-writable and schema versions drift — a draft block
+// missing a required string field crashed render (escapeHtml(undefined)),
+// and unknown block types rendered as "undefined". Keep only blocks that
+// match the model, defaulting the per-block strings; theme fields default
+// to the blank template's values. Corrupt-beyond-JSON drafts already fall
+// back to DEFAULT_CONTENT via loadDraft's catch.
+function sanitizeContent(c: SiteContent): SiteContent {
+    const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback);
+    const blocks: Block[] = (Array.isArray(c.blocks) ? c.blocks : [])
+        .filter((b): b is Block => !!b && typeof b === "object" && typeof b.type === "string")
+        .flatMap((b): Block[] => {
+            const id = str(b.id) || makeBlockId();
+            switch (b.type) {
+                case "heading":
+                case "paragraph":
+                    return [{ id, type: b.type, text: str(b.text) }];
+                case "link":
+                    return [{ ...b, id, label: str(b.label), url: str(b.url) }];
+                case "image":
+                    return [{ ...b, id, url: str(b.url), alt: str(b.alt) }];
+                case "divider":
+                    return [{ id, type: "divider" }];
+                default:
+                    return []; // unknown type — drop rather than render "undefined"
+            }
+        });
+    return {
+        ...c,
+        accentColor: str(c.accentColor, "#e6007a"),
+        background: str(c.background, "#0b0d12"),
+        fontFamily: str(c.fontFamily, "system-ui"),
+        blocks,
+    };
+}
+
 // Older drafts had fixed `header`/`subheader` fields (now heading/paragraph
 // blocks) and an `avatar` image variant (now size `small` via imageSize()).
 function migrateContent(c: SiteContent & { header?: string; subheader?: string }): SiteContent {
@@ -163,9 +198,9 @@ function migrateContent(c: SiteContent & { header?: string; subheader?: string }
         lead.push({ id: makeBlockId(), type: "heading", text: c.header });
     if (typeof c.subheader === "string" && c.subheader)
         lead.push({ id: makeBlockId(), type: "paragraph", text: c.subheader });
-    if (lead.length === 0) return c;
+    if (lead.length === 0) return sanitizeContent(c);
     const { header: _h, subheader: _s, ...rest } = c;
-    return { ...rest, blocks: [...lead, ...c.blocks] };
+    return sanitizeContent({ ...rest, blocks: [...lead, ...c.blocks] });
 }
 
 function loadDraft(): Draft | null {
