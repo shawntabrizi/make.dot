@@ -149,20 +149,36 @@ async function getMinCommitmentAge(callerAddress: string): Promise<number> {
     return Number(age);
 }
 
-export async function registerDomain(params: {
+export interface DomainCommitment {
+    registration: {
+        label: string;
+        owner: `0x${string}`;
+        secret: `0x${string}`;
+        reserved: boolean;
+    };
+    /** Seconds until the registrar accepts the reveal (minAge + safety buffer). */
+    totalWait: number;
+}
+
+/**
+ * Commit-reveal phase 1: map the account if needed and land the commitment.
+ * Split from the reveal so the caller can overlap the mandatory commitment
+ * age (~60s) with independent work — e.g. the Bulletin store.
+ */
+export async function commitDomain(params: {
     label: string;
     ownerEvmAddress: `0x${string}`;
     signerAddress: string;
     signer: PolkadotSigner;
     onStatus?: (status: string) => void;
-}): Promise<void> {
+}): Promise<DomainCommitment> {
     const { label, ownerEvmAddress, signerAddress, signer, onStatus } = params;
 
     onStatus?.("Mapping account on Asset Hub…");
     await ensureAccountMapped(signerAddress, signer);
 
     const secret = generateSecret();
-    const registration = { label, owner: ownerEvmAddress, secret, reserved: false } as const;
+    const registration = { label, owner: ownerEvmAddress, secret, reserved: false };
 
     // 1. Compute commitment (read-only)
     onStatus?.("Computing commitment…");
@@ -210,18 +226,29 @@ export async function registerDomain(params: {
         },
     );
 
-    // 3. Wait through the commitment age. Front-running protection — the
-    // protocol REQUIRES this delay.
     const minAge = await getMinCommitmentAge(signerAddress);
-    const totalWait = minAge + 6; // safety buffer per DotNS SDK
-    for (let remaining = totalWait; remaining > 0; remaining--) {
-        onStatus?.(`Waiting ${remaining}s for commitment age…`);
-        await new Promise((r) => setTimeout(r, 1000));
-    }
+    return { registration, totalWait: minAge + 6 }; // safety buffer per DotNS SDK
+}
 
-    // 4. Register with the priced payment value.
+/**
+ * Commit-reveal phase 2: price and register. Only valid after the
+ * commitment age from `commitDomain` has fully elapsed.
+ */
+export async function finishRegistration(params: {
+    commitment: DomainCommitment;
+    signerAddress: string;
+    signer: PolkadotSigner;
+    onStatus?: (status: string) => void;
+}): Promise<void> {
+    const { commitment, signerAddress, signer, onStatus } = params;
+    const { registration } = commitment;
+
     onStatus?.("Pricing domain…");
-    const priceWei = await getDomainPrice(label, ownerEvmAddress, signerAddress);
+    const priceWei = await getDomainPrice(
+        registration.label,
+        registration.owner,
+        signerAddress,
+    );
     const bufferedWei = (priceWei * 110n) / 100n; // 10% buffer per DotNS SDK
     const bufferedNative = bufferedWei / NATIVE_TO_ETH_RATIO;
 

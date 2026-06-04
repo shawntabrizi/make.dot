@@ -6,13 +6,14 @@
 // All account sources (host / extension / dev) submit for real — readiness
 // is judged up front by src/preflight.ts, not by gating the deploy path.
 
-import { storeHTML } from "./lib/bulletin/store.ts";
+import { storeHTML, type StoreHTMLResult } from "./lib/bulletin/store.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { ensureAccountMapped } from "./lib/dotns/contracts.ts";
 import {
     checkDomainAvailability,
+    commitDomain,
+    finishRegistration,
     getDomainOwner,
-    registerDomain,
 } from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
 import { DOT_HOST } from "./lib/polkadot/constants.ts";
@@ -84,30 +85,47 @@ export async function deployFull(
     account: ActiveAccount,
     onStatus: StatusFn,
 ): Promise<DeploySuccess> {
-    // Phase 1 — Bulletin store
-    onStatus("Bulletin: connecting…");
-    const stored = await storeHTML({
-        html,
-        signer: account.signer,
-        signerAddress: account.address,
-        displayName: account.displayName,
-        viaHost: account.source === "host",
-        onStatus: (s) => onStatus(`Bulletin: ${s}`),
-    });
+    // Pipelined: the DotNS commitment doesn't depend on the stored CID, so
+    // for fresh names the Bulletin store runs CONCURRENTLY with the
+    // protocol-mandated ~60s commitment age — removing the store entirely
+    // from the critical path. Invariant preserved from the sequential
+    // version: a store failure is a total failure (throw), while any DotNS
+    // failure still returns partial success (`dotMapped: false`) so the
+    // user keeps their CID and gateway URL.
+    const doStore = (): Promise<StoreHTMLResult> => {
+        onStatus("Bulletin: connecting…");
+        return storeHTML({
+            html,
+            signer: account.signer,
+            signerAddress: account.address,
+            displayName: account.displayName,
+            viaHost: account.source === "host",
+            onStatus: (s) => onStatus(`Bulletin: ${s}`),
+        });
+    };
+    const waitCommitmentAge = async (seconds: number) => {
+        for (let remaining = seconds; remaining > 0; remaining--) {
+            onStatus(`DotNS register: Waiting ${remaining}s for commitment age…`);
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+    };
 
-    // Phase 2 — DotNS register + setContenthash. Best-effort: if either fails
-    // we still return a successful Bulletin store with `dotMapped: false`, so
-    // the user has their CID and gateway URL even if AH-Next refused. The
-    // error message is captured on `dotError` so the UI can show what
-    // actually went wrong and (where possible) what to do about it.
+    let stored: StoreHTMLResult;
     let dotMapped = false;
     let dotError: string | null = null;
+
+    // ── Phase 1: DotNS prep (cheap dry-runs + commit tx). A failure here —
+    // including "name belongs to someone else" — still delivers the bytes:
+    // run the store and return partial success, matching the sequential
+    // version's behavior.
+    let commitment: Awaited<ReturnType<typeof commitDomain>> | null = null;
     try {
         onStatus("DotNS: resolving owner H160…");
         const ownerEvmAddress = await getEvmAddress(account.address);
 
         onStatus("DotNS: checking domain availability…");
         const available = await checkDomainAvailability(finalLabel, account.address);
+
         if (!available) {
             // Taken — but if it's taken by THIS account, this is a content
             // update: skip the commit-reveal registration (and its 60s+
@@ -121,11 +139,11 @@ export async function deployFull(
                 );
             }
             onStatus("DotNS: name already yours — updating content…");
-            // registerDomain normally handles the one-time H160 mapping;
+            // commitDomain normally handles the one-time H160 mapping;
             // the update path needs it ensured before the resolver call.
             await ensureAccountMapped(account.address, account.signer);
         } else {
-            await registerDomain({
+            commitment = await commitDomain({
                 label: finalLabel,
                 ownerEvmAddress,
                 signerAddress: account.address,
@@ -133,7 +151,48 @@ export async function deployFull(
                 onStatus: (s) => onStatus(`DotNS register: ${s}`),
             });
         }
+    } catch (cause) {
+        dotError = cause instanceof Error ? cause.message : String(cause);
+        stored = await doStore();
+        onStatus(`DotNS step failed — Bulletin store still succeeded. ${dotError}`);
+        return {
+            kind: "stored",
+            bytes: stored.bytes,
+            cid: stored.cid,
+            domain: finalLabel,
+            url: `https://${finalLabel}.${DOT_HOST}`,
+            gatewayUrl: stored.ipfsUrl,
+            blockHash: stored.blockHash,
+            blockNumber: stored.blockNumber,
+            dotMapped: false,
+            dotError,
+        };
+    }
 
+    // ── Phase 2: the store. For fresh names it runs CONCURRENTLY with the
+    // commitment-age wait. A store failure here propagates as a TOTAL
+    // failure (same contract as before) — the spent commitment expires
+    // harmlessly on-chain.
+    if (commitment) {
+        [, stored] = await Promise.all([
+            waitCommitmentAge(commitment.totalWait),
+            doStore(),
+        ]);
+    } else {
+        stored = await doStore();
+    }
+
+    // ── Phase 3: reveal + point the name. Failures are partial success —
+    // the user keeps their CID and gateway URL.
+    try {
+        if (commitment) {
+            await finishRegistration({
+                commitment,
+                signerAddress: account.address,
+                signer: account.signer,
+                onStatus: (s) => onStatus(`DotNS register: ${s}`),
+            });
+        }
         await setContentHash({
             label: finalLabel,
             cidString: stored.cid,
@@ -141,13 +200,10 @@ export async function deployFull(
             signer: account.signer,
             onStatus: (s) => onStatus(`DotNS resolver: ${s}`),
         });
-
         dotMapped = true;
     } catch (cause) {
         dotError = cause instanceof Error ? cause.message : String(cause);
         onStatus(`DotNS step failed — Bulletin store still succeeded. ${dotError}`);
-        // Don't rethrow: surface the partial-success to the caller so the UI
-        // can show the gateway URL even when the name mapping fell over.
     }
 
     return {

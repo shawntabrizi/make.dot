@@ -667,7 +667,10 @@ export default function App() {
         setStatus("Preparing deploy…");
         const updateDeployStatus = (message: string) => {
             setStatus(message);
-            setDeployStep(stepForDeployStatus(message));
+            // Monotonic: the pipelined deploy interleaves Bulletin statuses
+            // (step 1) with the commitment wait (step 5) — keep the bar at
+            // the furthest stage reached instead of bouncing backward.
+            setDeployStep((prev) => Math.max(prev ?? 0, stepForDeployStatus(message)));
         };
         try {
             if (!activeAccount || !effectiveLabel) {
