@@ -155,7 +155,16 @@ function renderBlock(block: Block): string {
             return `<p>${escapeHtml(block.text)}</p>`;
         case "link": {
             const wrap = block.variant === "pill" ? ' class="pill"' : "";
-            return `<p${wrap}><a href="${safeUrl(block.url)}" target="_blank" rel="noopener">${escapeHtml(block.label)}</a></p>`;
+            const href = safeUrl(block.url);
+            // mailto links: no target=_blank (it's a mail client, not a tab),
+            // and Cloudflare's documented email_off opt-out — CF-fronted IPFS
+            // gateways otherwise rewrite the href to /cdn-cgi/l/email-protection
+            // whose decoder script 404s on the displaying origin, leaving a
+            // dead link.
+            if (/^mailto:/i.test(href)) {
+                return `<p${wrap}><!--email_off--><a href="${href}">${escapeHtml(block.label)}</a><!--/email_off--></p>`;
+            }
+            return `<p${wrap}><a href="${href}" target="_blank" rel="noopener">${escapeHtml(block.label)}</a></p>`;
         }
         case "image": {
             const size = imageSize(block.variant);
