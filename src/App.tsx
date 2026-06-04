@@ -8,6 +8,7 @@ import {
     assembleDocument,
     DEFAULT_CONTENT,
     DEFAULT_FONT_SIZE,
+    escapeHtml,
     FONT_OPTIONS,
     renderHtml,
     renderHtmlParts,
@@ -56,13 +57,23 @@ type ActionMenu = "layout" | "colors" | "font" | "add" | "mode";
 type HtmlPane = "html" | "css" | "js";
 const PANE_GLYPHS: Record<HtmlPane, string> = { html: "<>", css: "{}", js: "JS" };
 
-// <title> for assembled pane documents and the auto-name seed: the first
+// Decode HTML entities (&#39; &amp; …) to plain text. The blocks renderer
+// entity-encodes heading text, so anything extracted from rendered markup
+// must be decoded before non-HTML use — "sveta&#39;s" fed to deriveDomain
+// turned into "sveta-39-s". textarea innerHTML never executes content.
+function decodeEntities(s: string): string {
+    const el = document.createElement("textarea");
+    el.innerHTML = s;
+    return el.value;
+}
+
+// Title for assembled pane documents and the auto-name seed: the first
 // <h1>–<h3>'s text in document order, falling back to the same default the
-// blocks renderer uses. The heading markup is already entity-encoded, so the
-// result is safe for <title> once tags are stripped.
+// blocks renderer uses. Returns DECODED plain text — escape it again before
+// embedding in markup (assembleDocument's title contract).
 function titleFromHtml(body: string): string {
     const m = body.match(/<(h[1-3])[^>]*>([\s\S]*?)<\/\1>/i);
-    const text = m ? m[2].replace(/<[^>]*>/g, "").trim() : "";
+    const text = m ? decodeEntities(m[2].replace(/<[^>]*>/g, "")).trim() : "";
     return text || "hello";
 }
 type DeployResult = DeploySuccess;
@@ -468,7 +479,7 @@ export default function App() {
                 return renderMarkdownHtml(markdownText, content);
             case "html":
                 return assembleDocument({
-                    title: titleFromHtml(htmlText),
+                    title: escapeHtml(titleFromHtml(htmlText)),
                     css: cssText,
                     bodyHtml: htmlText,
                     js: jsText,

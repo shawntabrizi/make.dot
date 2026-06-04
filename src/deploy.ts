@@ -37,7 +37,10 @@ export type StatusFn = (message: string) => void;
 // `dot decentralize`'s rule: base ≥9 + exactly 2 trailing digits → NoStatus.
 export function deriveDomain(seed: string): string {
     let s = seed
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "") // strip diacritics: café → cafe, not caf-
         .toLowerCase()
+        .replace(/['’`´]/g, "") // sveta's → svetas, not sveta-s
         .replace(/[^a-z0-9-]/g, "-")
         .replace(/-+/g, "-")
         .replace(/^-+|-+$/g, "");
