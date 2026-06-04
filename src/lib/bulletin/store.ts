@@ -1,4 +1,12 @@
-// Bulletin storage flow: check authorization → TransactionStorage.store →
+// Bulletin storage, two routes:
+//
+// HOST (`viaHost`): the host submits the bytes as a preimage
+// (`preimageManager.submit` + RFC-0002 PreimageSubmit permission) — no
+// Bulletin RPC connection, no account authorization, no signing-channel
+// size negotiation. No block info comes back; the client-side CID is the
+// receipt (Rock-Paper-Scissors / t3rminal pattern).
+//
+// DIRECT (extension///Bob): check authorization → TransactionStorage.store →
 // wait for inclusion. Authorization check is REQUIRED — unauthorized store
 // transactions fail silently on Bulletin Chain (no on-chain error event).
 //
@@ -8,7 +16,9 @@
 // `store` call is a non-expired authorization existing at all — the soft
 // byte counters only feed transaction priority.
 
+import { preimageManager } from "@novasamatech/product-sdk";
 import { Enum, type PolkadotSigner } from "polkadot-api";
+import { ensureHostPermission } from "../host/permissions.ts";
 import { getBulletinClient } from "../polkadot/clients.ts";
 import { BULLETIN_FAUCET_URL, BULLETIN_GATEWAY } from "../polkadot/constants.ts";
 import { computeCID } from "./cid.ts";
@@ -20,8 +30,9 @@ const MAX_SIZE = MAX_TX_BYTES;
 
 export interface StoreHTMLResult {
     cid: string;
-    blockNumber: number;
-    blockHash: string;
+    /** Null on the host preimage route — the host doesn't report inclusion. */
+    blockNumber: number | null;
+    blockHash: string | null;
     ipfsUrl: string;
     bytes: number;
 }
@@ -74,15 +85,36 @@ export async function storeBytes(params: {
     signerAddress: string;
     displayName: string;
     label?: string;
+    /** Route through the host's preimage submission (host accounts). */
+    viaHost?: boolean;
     onStatus?: (status: DeployStatus) => void;
 }): Promise<StoreHTMLResult> {
-    const { bytes, signer, signerAddress, displayName, label = "Content", onStatus } = params;
+    const { bytes, signer, signerAddress, displayName, label = "Content", viaHost, onStatus } =
+        params;
 
     if (bytes.length === 0) throw new Error(`${label} is empty — nothing to store`);
     if (bytes.length > MAX_SIZE) {
         throw new Error(
             `${label} is ${bytes.length.toLocaleString()} bytes — Bulletin max is ${MAX_SIZE.toLocaleString()} (~2 MiB)`,
         );
+    }
+
+    if (viaHost) {
+        // Status tags map onto the same stages the direct route reports:
+        // permission prompt ≈ signing, host submission ≈ broadcast.
+        onStatus?.("signing");
+        await ensureHostPermission("PreimageSubmit");
+        const cid = computeCID(bytes).toString();
+        onStatus?.("broadcasting");
+        await preimageManager.submit(bytes);
+        onStatus?.("finalized");
+        return {
+            cid,
+            blockNumber: null,
+            blockHash: null,
+            ipfsUrl: `${BULLETIN_GATEWAY}${cid}`,
+            bytes: bytes.length,
+        };
     }
 
     const auth = await checkBulletinAuthorization(signerAddress);
@@ -118,6 +150,7 @@ export async function storeHTML(params: {
     signer: PolkadotSigner;
     signerAddress: string;
     displayName: string;
+    viaHost?: boolean;
     onStatus?: (status: DeployStatus) => void;
 }): Promise<StoreHTMLResult> {
     return storeBytes({
@@ -126,6 +159,7 @@ export async function storeHTML(params: {
         signerAddress: params.signerAddress,
         displayName: params.displayName,
         label: "HTML",
+        viaHost: params.viaHost,
         onStatus: params.onStatus,
     });
 }

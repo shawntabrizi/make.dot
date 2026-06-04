@@ -104,9 +104,20 @@ export async function runPreflight(params: {
         link: null,
     };
 
-    // ── bulletin: a non-expired authorization is the actual store gate;
-    //    the byte allowance is a soft priority signal (warn, never fail) ──
+    // ── bulletin: host accounts store via the host's preimage channel (no
+    //    authorization, no Bulletin RPC). For direct routes a non-expired
+    //    authorization is the actual store gate; the byte allowance is a
+    //    soft priority signal (warn, never fail) ──────────────────────────
     const bulletinCheck = async (): Promise<PreflightCheck> => {
+        if (account.source === "host") {
+            return {
+                id: "bulletin",
+                label: "Bulletin storage",
+                state: "ok",
+                detail: "Submitted by the host — no account authorization needed",
+                link: null,
+            };
+        }
         const auth = await checkBulletinAuthorization(account.address);
         if (!auth.authorized) {
             return {

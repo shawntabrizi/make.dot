@@ -14,7 +14,6 @@
 import { useSyncExternalStore } from "react";
 import {
     createAccountsProvider,
-    requestPermission,
     type ProductAccount,
 } from "@novasamatech/product-sdk";
 import { RequestCredentialsErr } from "@novasamatech/host-api";
@@ -148,24 +147,6 @@ export async function connectHostAccount(): Promise<HostState> {
 export async function signInToHost(): Promise<HostState> {
     await accountsProvider.requestLogin("Sign in to deploy with hello-playground");
     return connectHostAccount();
-}
-
-// ── RFC-0002 permissions ────────────────────────────────────────────────────
-// ChainSubmit is required before host-mediated transaction submission.
-// Idempotent; one host prompt per session at most.
-
-const grantedPermissions = new Set<string>();
-
-export async function ensureChainSubmitPermission(): Promise<void> {
-    if (grantedPermissions.has("ChainSubmit")) return;
-    try {
-        const result = await requestPermission({ tag: "ChainSubmit", value: undefined });
-        if (result.isOk() && result.value) {
-            grantedPermissions.add("ChainSubmit");
-        }
-    } catch {
-        // Host without RFC-0002 — submission itself will prompt or fail loud.
-    }
 }
 
 export function getHostState(): HostState {

@@ -20,8 +20,9 @@ export interface DeploySuccess {
     domain: string;
     url: string;
     gatewayUrl: string;
-    blockHash: string;
-    blockNumber: number;
+    /** Null on the host preimage route — the host doesn't report inclusion. */
+    blockHash: string | null;
+    blockNumber: number | null;
     /** True iff DotNS register + setContenthash both succeeded — `<name>.dot.li` resolves. */
     dotMapped: boolean;
     /** Reason DotNS failed, if it did. Null when dotMapped===true. */
@@ -73,6 +74,7 @@ export async function deployFull(
         signer: account.signer,
         signerAddress: account.address,
         displayName: account.displayName,
+        viaHost: account.source === "host",
         onStatus: (s) => onStatus(`Bulletin: ${s}`),
     });
 

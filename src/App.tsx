@@ -22,7 +22,8 @@ import {
 } from "./template.ts";
 import { deployFull, deriveDomain, type DeploySuccess } from "./deploy.ts";
 import { runPreflight, type PreflightReport } from "./preflight.ts";
-import { ensureChainSubmitPermission, signInToHost, useHostState } from "./signer.ts";
+import { signInToHost, useHostState } from "./signer.ts";
+import { ensureHostPermission } from "./lib/host/permissions.ts";
 import {
     type ActiveAccount,
     getDevAccount,
@@ -274,7 +275,9 @@ export default function App() {
 
     useEffect(() => {
         const address = activeAccount?.address;
-        if (!address) {
+        // Host accounts store via the host's preimage channel — no Bulletin
+        // authorization (and no Bulletin RPC connection) needed.
+        if (!address || activeAccount?.source === "host") {
             setMaxStoreBytes(null);
             return;
         }
@@ -561,14 +564,12 @@ export default function App() {
         // uploads start from a conservative budget; on rejection we halve
         // and re-encode (the host rejects before any approval prompt, so
         // retries don't cost the user taps).
+        // Host uploads go through the host's preimage channel (no signing) but
+        // still cross the host message bridge — keep the adaptive budget.
         let budget =
             activeAccount.source === "host"
                 ? Math.min(chainLimit, HOST_SIGN_BUDGET)
                 : chainLimit;
-        // RFC-0002: host-mediated submission needs ChainSubmit granted.
-        if (activeAccount.source === "host") {
-            await ensureChainSubmitPermission();
-        }
         for (;;) {
             onStatus("Optimizing image…");
             const resized = await resizeImageToFit(file, Math.floor(budget * 0.95));
@@ -586,6 +587,7 @@ export default function App() {
                     signerAddress: activeAccount.address,
                     displayName: activeAccount.displayName,
                     label,
+                    viaHost: activeAccount.source === "host",
                     onStatus,
                 });
                 return stored.ipfsUrl;
@@ -658,9 +660,10 @@ export default function App() {
             if (!activeAccount || !effectiveLabel) {
                 throw new Error("No account connected or no name resolved");
             }
-            // RFC-0002: host-mediated submission needs ChainSubmit granted.
+            // RFC-0002: the DotNS contract calls go through host-mediated
+            // transaction submission, which needs ChainSubmit granted.
             if (activeAccount.source === "host") {
-                await ensureChainSubmitPermission();
+                await ensureHostPermission("ChainSubmit");
             }
             const stored = await deployFull(
                 currentHtml(),
@@ -1271,9 +1274,11 @@ export default function App() {
                                     {result.gatewayUrl}
                                 </a>
                             </Row>
-                            <Row label="block">
-                                #{result.blockNumber.toLocaleString()}
-                            </Row>
+                            {result.blockNumber !== null && (
+                                <Row label="block">
+                                    #{result.blockNumber.toLocaleString()}
+                                </Row>
+                            )}
                             {result.dotMapped ? (
                                 <p className="result-note success">
                                     Live on{" "}
