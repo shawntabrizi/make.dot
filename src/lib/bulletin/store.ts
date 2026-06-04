@@ -105,15 +105,30 @@ export async function storeBytes(params: {
         // permission prompt ≈ signing, host submission ≈ broadcast.
         onStatus?.("signing");
         await ensureHostPermission("PreimageSubmit");
-        const cid = computeCID(bytes).toString();
+        const cid = computeCID(bytes);
         onStatus?.("broadcasting");
-        await preimageManager.submit(bytes);
+        const key = await preimageManager.submit(bytes);
+        // The returned key is the preimage hash. When it's a comparable
+        // 32-byte hex, verify it matches our blake2b-256 digest — a mismatch
+        // means the host stored (or hashed) something other than what we
+        // sent, and the gateway URL we'd report would 404. Unrecognized key
+        // formats pass through: a host-side format change must not start
+        // failing every upload.
+        const digestHex = `0x${Array.from(cid.multihash.digest, (b) =>
+            b.toString(16).padStart(2, "0"),
+        ).join("")}`;
+        if (/^0x[0-9a-f]{64}$/i.test(key) && key.toLowerCase() !== digestHex) {
+            throw new Error(
+                `Host preimage key ${key} doesn't match the expected blake2b-256 ` +
+                    `digest ${digestHex} — the stored bytes may differ from what was sent`,
+            );
+        }
         onStatus?.("finalized");
         return {
-            cid,
+            cid: cid.toString(),
             blockNumber: null,
             blockHash: null,
-            ipfsUrl: `${BULLETIN_GATEWAY}${cid}`,
+            ipfsUrl: `${BULLETIN_GATEWAY}${cid.toString()}`,
             bytes: bytes.length,
         };
     }
