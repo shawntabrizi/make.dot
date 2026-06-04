@@ -10,6 +10,7 @@ import {
     assertDryRunOk,
     dryRunContractCall,
     ensureAccountMapped,
+    revertSelector,
     submitContractCall,
 } from "./contracts.ts";
 
@@ -263,12 +264,35 @@ export async function finishRegistration(params: {
         functionName: "register",
         args: [registration],
     });
-    const registerGas = await dryRunContractCall(
+    let registerGas = await dryRunContractCall(
         DOTNS_CONTRACTS.registrarController,
         signerAddress,
         registerData,
         bufferedNative,
     );
+    // CommitmentNotFound / CommitmentTooNew right after the wait is usually
+    // TRANSIENT: the commit resolved at in-block, and a lagging RPC replica
+    // (or a short reorg) may not show it yet. This got much more visible
+    // when the registrar dropped minCommitmentAge from 60s to 6s — the wait
+    // no longer hides settling time. Retry the (free) dry-run for up to
+    // ~30s before declaring failure.
+    const TRANSIENT = new Set([
+        "0x836588c9", // CommitmentNotFound(bytes32)
+        "0x5320bcf9", // CommitmentTooNew(bytes32)
+        "0x74480cc9", // CommitmentTooNew(bytes32,uint256,uint256)
+    ]);
+    for (let attempt = 1; !registerGas.success && attempt <= 10; attempt++) {
+        const selector = revertSelector(registerGas.returnData);
+        if (!selector || !TRANSIENT.has(selector)) break;
+        onStatus?.(`Commitment not visible yet — retrying (${attempt}/10)…`);
+        await new Promise((r) => setTimeout(r, 3000));
+        registerGas = await dryRunContractCall(
+            DOTNS_CONTRACTS.registrarController,
+            signerAddress,
+            registerData,
+            bufferedNative,
+        );
+    }
     // The expensive gate: a register that would revert must not be paid for.
     // The commitment is NOT consumed by this stop — it stays valid until
     // maxCommitmentAge, so a retry after fixing the cause still works.

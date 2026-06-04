@@ -165,10 +165,27 @@ export async function dryRunContractCall(
     };
 }
 
+/** First 4 bytes of revert data — the custom-error selector. */
+export function revertSelector(returnData: `0x${string}`): string | null {
+    return returnData.length >= 10 ? returnData.slice(0, 10).toLowerCase() : null;
+}
+
+// The registrar controller's custom errors (selector = keccak of signature).
+const KNOWN_ERRORS: Record<string, { name: string; arg?: "bytes32" | "string" | "uint256" }> = {
+    "0x836588c9": { name: "CommitmentNotFound", arg: "bytes32" },
+    "0x5320bcf9": { name: "CommitmentTooNew", arg: "bytes32" },
+    "0xcb7690d7": { name: "CommitmentTooOld", arg: "bytes32" },
+    "0x0a059d71": { name: "UnexpiredCommitmentExists", arg: "bytes32" },
+    "0x477707e8": { name: "NameNotAvailable", arg: "string" },
+    "0x11011294": { name: "InsufficientValue" },
+    "0x9a71997b": { name: "DurationTooShort", arg: "uint256" },
+};
+
 /**
  * Best-effort human form of a reverted dry-run's return data. Solidity
  * `revert("reason")` encodes as Error(string) (selector 0x08c379a0);
- * anything else is surfaced as raw hex so it's at least greppable.
+ * known registrar custom errors decode by name; anything else is surfaced
+ * as raw hex so it's at least greppable.
  */
 export function describeRevert(returnData: `0x${string}`): string {
     if (returnData.startsWith("0x08c379a0")) {
@@ -180,6 +197,20 @@ export function describeRevert(returnData: `0x${string}`): string {
             return reason as string;
         } catch {
             // fall through to raw hex
+        }
+    }
+    const selector = revertSelector(returnData);
+    const known = selector ? KNOWN_ERRORS[selector] : undefined;
+    if (known) {
+        if (!known.arg) return known.name;
+        try {
+            const [arg] = decodeAbiParameters(
+                [{ type: known.arg }],
+                `0x${returnData.slice(10)}` as `0x${string}`,
+            );
+            return `${known.name}(${String(arg)})`;
+        } catch {
+            return known.name;
         }
     }
     return returnData === "0x" ? "no revert data" : returnData;
