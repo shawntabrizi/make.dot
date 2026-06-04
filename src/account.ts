@@ -15,6 +15,7 @@ import { ss58Encode, truncateAddress } from "@parity/product-sdk-address";
 import { createDevSigner, getDevPublicKey } from "@parity/product-sdk-tx";
 import { connectInjectedExtension, getInjectedExtensions } from "polkadot-api/pjs-signer";
 import type { PolkadotSigner } from "polkadot-api";
+import { isInHost } from "./lib/host/detect.ts";
 import { signerManager } from "./signer.ts";
 
 export type AccountSource = "host" | "extension" | "dev";
@@ -61,6 +62,24 @@ export async function tryHostAccount(): Promise<ActiveAccount | null> {
         // routes it through host_create_transaction) — no adapter needed.
         signer: account.getSigner(),
     };
+}
+
+/**
+ * Resolve the host account with retries. Mobile webviews inject the host
+ * bridge ASYNCHRONOUSLY — a single connect attempt at mount races the
+ * injection and loses (works on Desktop/web-iframe, fails on Mobile).
+ * Inside a detected host environment we retry for ~6s, matching the
+ * polkadot-triangle boot sequence (10× / 500ms); standalone gets one fast
+ * attempt so the fallback UI isn't delayed in a plain browser.
+ */
+export async function resolveHostAccount(): Promise<ActiveAccount | null> {
+    const attempts = isInHost() ? 12 : 1;
+    for (let i = 0; i < attempts; i++) {
+        const account = await tryHostAccount();
+        if (account) return account;
+        if (i < attempts - 1) await new Promise((r) => setTimeout(r, 500));
+    }
+    return null;
 }
 
 /** Discover whether any browser-wallet extension is injected on this page. */

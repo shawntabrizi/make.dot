@@ -27,8 +27,8 @@ import {
     type ActiveAccount,
     getDevAccount,
     hasInjectedExtension,
+    resolveHostAccount,
     tryExtensionAccount,
-    tryHostAccount,
 } from "./account.ts";
 import {
     checkBulletinAuthorization,
@@ -115,6 +115,12 @@ function stepForDeployStatus(message: string): number {
     if (message.startsWith("DotNS step failed")) return 7;
     return 0;
 }
+
+// Host-signed upload budgets — empirical, since the host's "message too big"
+// threshold isn't queryable. Start here, halve per rejection, give up below
+// the floor (a sub-32 KB image means something else is wrong).
+const HOST_SIGN_BUDGET = 256 * 1024;
+const MIN_SIGN_BUDGET = 32 * 1024;
 
 function makeBlockId(): string {
     return Math.random().toString(36).slice(2, 10);
@@ -220,11 +226,12 @@ export default function App() {
         ? devAccount
         : hostAccount ?? extensionAccount;
 
-    // Try the host once on mount — the default signer when running inside
-    // Polkadot Desktop/Mobile. Resolves to null in a plain browser.
+    // Resolve the host on mount — the default signer when running inside
+    // Polkadot Desktop/Mobile. Retries while the (async) mobile bridge
+    // injects; resolves to null quickly in a plain browser.
     useEffect(() => {
         let cancelled = false;
-        tryHostAccount()
+        resolveHostAccount()
             .then((account) => {
                 if (!cancelled && account) setHostAccount(account);
             })
@@ -531,25 +538,49 @@ export default function App() {
         // pass through untouched. The byte budget is the smaller of the chain's
         // per-tx cap and the account authorization (chain cap even when the
         // auth query failed).
-        const uploadLimit = Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES);
-        onStatus("Optimizing image…");
-        const resized = await resizeImageToFit(file, Math.floor(uploadLimit * 0.95));
-        const bytes = resized.bytes;
-        const label = `Image (${resized.filename || "untitled"})`;
-        onStatus(
-            resized.finalBytes !== resized.originalBytes
-                ? `Optimized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`
-                : "Uploading to Bulletin…",
-        );
-        const stored = await storeBytes({
-            bytes,
-            signer: activeAccount.signer,
-            signerAddress: activeAccount.address,
-            displayName: activeAccount.displayName,
-            label,
-            onStatus,
-        });
-        return stored.ipfsUrl;
+        const chainLimit = Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES);
+        // The host signing channel rejects large payloads with an opaque
+        // "message too big" — the limit isn't published anywhere we can
+        // query, and it's far below the chain's 2 MiB cap. Host-signed
+        // uploads start from a conservative budget; on rejection we halve
+        // and re-encode (the host rejects before any approval prompt, so
+        // retries don't cost the user taps).
+        let budget =
+            activeAccount.source === "host"
+                ? Math.min(chainLimit, HOST_SIGN_BUDGET)
+                : chainLimit;
+        for (;;) {
+            onStatus("Optimizing image…");
+            const resized = await resizeImageToFit(file, Math.floor(budget * 0.95));
+            const bytes = resized.bytes;
+            const label = `Image (${resized.filename || "untitled"})`;
+            onStatus(
+                resized.finalBytes !== resized.originalBytes
+                    ? `Optimized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`
+                    : "Uploading to Bulletin…",
+            );
+            try {
+                const stored = await storeBytes({
+                    bytes,
+                    signer: activeAccount.signer,
+                    signerAddress: activeAccount.address,
+                    displayName: activeAccount.displayName,
+                    label,
+                    onStatus,
+                });
+                return stored.ipfsUrl;
+            } catch (cause) {
+                const message = cause instanceof Error ? cause.message : String(cause);
+                const next = Math.floor(budget / 2);
+                if (!/too big|too large/i.test(message) || next < MIN_SIGN_BUDGET) {
+                    throw cause;
+                }
+                budget = next;
+                onStatus(
+                    `Signer rejected the size — retrying at ${(budget / 1024).toFixed(0)} KB…`,
+                );
+            }
+        }
     };
 
     // Upload state lives HERE, keyed by block id — not in the bottom sheet.
