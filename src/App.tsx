@@ -36,7 +36,6 @@ import {
 } from "./account.ts";
 import { isInsideContainerSync } from "@parity/product-sdk-host";
 import {
-    checkBulletinAuthorization,
     MAX_TX_BYTES,
     storeBytes,
 } from "./lib/bulletin/store.ts";
@@ -215,8 +214,6 @@ export default function App() {
     const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
     const [resolvingOwned, setResolvingOwned] = useState(false);
     const [ownedError, setOwnedError] = useState<string | null>(null);
-    const [maxStoreBytes, setMaxStoreBytes] = useState<number | null>(null);
-
     // Host resource grants — the deploy gate for host-sourced accounts needs
     // BulletinAllowance + SmartContractAllowance both "Allocated".
     const resourceState = useResourceAllocationState();
@@ -253,26 +250,6 @@ export default function App() {
             })
             .finally(() => setResolvingOwned(false));
     }, [useOwnedAccount, hostAccount, extensionAccount]);
-
-    useEffect(() => {
-        const address = activeAccount?.address;
-        if (!address) {
-            setMaxStoreBytes(null);
-            return;
-        }
-        let cancelled = false;
-        checkBulletinAuthorization(address)
-            .then((auth) => {
-                if (cancelled) return;
-                setMaxStoreBytes(auth.authorized ? Number(auth.bytes) : 0);
-            })
-            .catch(() => {
-                if (!cancelled) setMaxStoreBytes(null);
-            });
-        return () => {
-            cancelled = true;
-        };
-    }, [activeAccount?.address]);
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -484,7 +461,7 @@ export default function App() {
         // pass through untouched. The byte budget is the smaller of the chain's
         // per-tx cap and the account authorization (chain cap even when the
         // auth query failed).
-        const uploadLimit = Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES);
+        const uploadLimit = MAX_TX_BYTES;
         onStatus("Optimizing image…");
         const resized = await resizeImageToFit(file, Math.floor(uploadLimit * 0.95));
         const bytes = resized.bytes;
@@ -999,7 +976,7 @@ export default function App() {
                     onUpload={(file) => startImageUpload(editingBlock.id, file)}
                     uploadStatus={uploads[editingBlock.id] ?? null}
                     uploadError={uploadErrors[editingBlock.id] ?? null}
-                    maxStoreBytes={Math.min(MAX_TX_BYTES, maxStoreBytes || MAX_TX_BYTES)}
+                    maxStoreBytes={MAX_TX_BYTES}
                 />
             )}
 

@@ -1,14 +1,14 @@
-// Bulletin storage flow via the host-routed CloudStorageClient: pre-flight
-// authorization check → store().send() → receipt with CID + block. The
-// authorization check is REQUIRED — unauthorized store transactions fail
-// silently on Bulletin Chain (no on-chain error event).
+// Bulletin storage flow via the host-routed CloudStorageClient:
+// validate size → store().send() → receipt with CID + block.
+//
+// No per-account authorization pre-flight is needed: the app requests a
+// BulletinAllowance via signerManager.requestResourceAllocation() on connect,
+// and the host transparently authorizes Bulletin stores through that allowance.
 //
 // The client is a lazy singleton built once and reused. Its signer is resolved
 // per-call from the currently-active account (host / extension / dev) so the
-// same client signs with whichever source the user selected. Callers supply
-// only `signerAddress` (used for the authorization pre-flight); actual signing
-// goes through the lazy signer — there is no `signer` param on storeBytes /
-// storeHTML.
+// same client signs with whichever source the user selected. There is no
+// `signer` param on storeBytes / storeHTML.
 
 import {
     CloudStorageClient,
@@ -18,7 +18,7 @@ import {
 } from "@parity/product-sdk-cloud-storage";
 import type { PolkadotSigner } from "polkadot-api";
 import { getCurrentAccount } from "../../account.ts";
-import { BULLETIN_FAUCET_URL, BULLETIN_GATEWAY } from "../polkadot/constants.ts";
+import { BULLETIN_GATEWAY } from "../polkadot/constants.ts";
 import type { DeployStatus } from "./submit-and-wait.ts";
 
 /** Per-transaction chain cap — applies regardless of account authorization. */
@@ -35,12 +35,6 @@ export interface StoreHTMLResult {
     blockHash: string | null;
     ipfsUrl: string;
     bytes: number;
-}
-
-interface AuthCheck {
-    authorized: boolean;
-    transactions: number;
-    bytes: bigint;
 }
 
 // Promise-based singleton so concurrent first callers share one
@@ -60,16 +54,6 @@ function getCloudStorageClient(): Promise<CloudStorageClient> {
     return clientPromise;
 }
 
-export async function checkBulletinAuthorization(address: string): Promise<AuthCheck> {
-    const client = await getCloudStorageClient();
-    const auth = await client.checkAuthorization(address);
-    return {
-        authorized: auth.authorized && auth.remainingTransactions > 0 && auth.remainingBytes > 0n,
-        transactions: auth.remainingTransactions,
-        bytes: auth.remainingBytes,
-    };
-}
-
 export async function storeBytes(params: {
     bytes: Uint8Array;
     signerAddress: string;
@@ -77,7 +61,7 @@ export async function storeBytes(params: {
     label?: string;
     onStatus?: (status: DeployStatus) => void;
 }): Promise<StoreHTMLResult> {
-    const { bytes, signerAddress, displayName, label = "Content", onStatus } = params;
+    const { bytes, label = "Content", onStatus } = params;
 
     if (bytes.length === 0) throw new Error(`${label} is empty — nothing to store`);
     if (bytes.length > MAX_TX_BYTES) {
@@ -87,19 +71,6 @@ export async function storeBytes(params: {
     }
 
     const client = await getCloudStorageClient();
-
-    const auth = await client.checkAuthorization(signerAddress);
-    if (!auth.authorized || auth.remainingTransactions <= 0 || auth.remainingBytes <= 0n) {
-        throw new Error(
-            `No Bulletin authorization for ${displayName} (${signerAddress}).\n\n` +
-                `Self-serve faucet:\n${BULLETIN_FAUCET_URL}`,
-        );
-    }
-    if (auth.remainingBytes < BigInt(bytes.length)) {
-        throw new Error(
-            `${displayName} is authorized for ${auth.remainingBytes} bytes but ${label.toLowerCase()} is ${bytes.length} bytes`,
-        );
-    }
 
     onStatus?.("signing");
     const result = await client

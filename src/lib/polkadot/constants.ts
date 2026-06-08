@@ -17,21 +17,21 @@ export const ASSET_HUB_RPC = "wss://paseo-asset-hub-next-rpc.polkadot.io";
 export const ASSET_HUB_GENESIS =
     "0xbf0488dbe9daa1de1c08c5f743e26fdc2a4ecd74cf87dd1b4b1eeb99ae4ef19f";
 
-// DotNS deployed contract addresses on paseo-next-v2's Asset Hub.
+// DotNS deployed contract addresses (source: bulletin-deploy/assets/environments.json).
+// Maps: DOTNS_REGISTRY / DOTNS_REGISTRAR / DOTNS_REGISTRAR_CONTROLLER /
+//       DOTNS_CONTENT_RESOLVER / POP_RULES.
+// The Paseo Asset Hub Next testnet resets periodically — re-sync these with
+// environments.json after any testnet reset.
 export const DOTNS_CONTRACTS = {
-    registry: "0x8877344A885682523B4613779C95688ed7037BfD",
-    registrar: "0x885b8085bA92A31c4ef52076f77379E647ECC399",
-    registrarController: "0x320b72c6e70D5a631d835FfD95915B288b26E6Be",
-    contentResolver: "0x2c9FF5D9136DBE5814C7B4FDbeDC15273a776663",
-    popRules: "0x2002C1c15b88632Ad01c7770f6EbE1Ca05c8472E",
+    registry: "0xa1b2b939E82b2ecE55Bd8a0E283818BfC1CA6CDc",
+    registrar: "0xf7Ad3F44F316C73E4a2b46b1ed48d376bCc9E639",
+    registrarController: "0x674b705268DAE369F0a7BE9cbaCDb928b8BA38C2",
+    contentResolver: "0x8A26480b0B5Df3d4D9b95adc24a5Ecb33A5b8F64",
+    popRules: "0x4909bFb3f4Fd86244abD6430fDfA0Ce5C91aD0c4",
 } as const;
 
 /** 1 PAS (native, 12 decimals) = 1_000_000 Wei (EVM, 18 decimals). */
 export const NATIVE_TO_ETH_RATIO = 1_000_000n;
-
-/** Self-serve faucet for Bulletin storage authorization on Paseo. */
-export const BULLETIN_FAUCET_URL =
-    "https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet";
 
 /** PAS faucet for paying contract fees on Asset Hub Next. */
 export const PAS_FAUCET_URL = "https://faucet.polkadot.io/";
