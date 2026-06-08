@@ -30,19 +30,21 @@ import { ASSET_HUB_GENESIS, ASSET_HUB_RPC } from "./constants.ts";
 type AssetHubApi = TypedApi<typeof pah>;
 type Client = ReturnType<typeof createClient>;
 
+// Cached for the page lifetime — isInsideContainerSync() is evaluated once at
+// first call. Environment (host vs. standalone) is assumed not to change within
+// a session, which holds for this SPA (no SSR, no dynamic context switches).
 let assetHubClient: Client | null = null;
 let assetHubApi: AssetHubApi | null = null;
 let assetHubUnsafeApi: ReturnType<Client["getUnsafeApi"]> | null = null;
 
 function getAssetHubProvider() {
-    const directWs = getWsProvider(ASSET_HUB_RPC);
     // Construct the host provider only when in a host — otherwise it throws.
     // The direct WS provider is passed as `__fallback` so that even in-host,
     // if the host can't serve this chain, papi falls back to a direct dial.
     if (isInsideContainerSync()) {
-        return createPapiProvider(ASSET_HUB_GENESIS, directWs);
+        return createPapiProvider(ASSET_HUB_GENESIS, getWsProvider(ASSET_HUB_RPC));
     }
-    return directWs;
+    return getWsProvider(ASSET_HUB_RPC);
 }
 
 export function getAssetHubClient(): {

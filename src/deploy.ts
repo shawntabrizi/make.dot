@@ -3,8 +3,7 @@
 //   2. DotNS register (label → owned)
 //   3. DotNS setContenthash (CID ↔ label)
 //
-// The host signer is no longer stubbed. Host/extension submission enablement
-// and Allocated gating are pending (Task 4).
+// Host/extension submission is live; allowance gating is enforced in App.tsx.
 
 import { calculateCid } from "@parity/product-sdk-cloud-storage";
 import { storeHTML } from "./lib/bulletin/store.ts";
@@ -117,7 +116,7 @@ export async function deployFull(
             throw new Error(`Domain ${finalLabel}.dot is already registered. Pick another name.`);
         }
 
-        // TODO(T4): host/extension submission + Allocated gating
+        // Submission gating (host allowances) lives in App.tsx deploy().
         await registerDomain({
             label: finalLabel,
             ownerEvmAddress,
@@ -126,7 +125,6 @@ export async function deployFull(
             onStatus: (s) => onStatus(`DotNS register: ${s}`),
         });
 
-        // TODO(T4): host/extension submission + Allocated gating
         await setContentHash({
             label: finalLabel,
             cidString: stored.cid,

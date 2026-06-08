@@ -587,7 +587,10 @@ export default function App() {
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    const canDeploy = !busy && activeAccount !== null;
+    const canDeploy =
+        !busy &&
+        activeAccount !== null &&
+        !(activeAccount.source === "host" && !hostAllowancesGranted);
     const showOwnedHint =
         useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
 
