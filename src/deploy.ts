@@ -163,7 +163,9 @@ export async function deployFull(
     // (the account may be mapped from a prior run) and just capture any error.
     let listed = false;
     let registryError: string | null = null;
-    try {
+    // Gated on dotMapped: the grid resolves a listing via its .dot name →
+    // contenthash, so listing a name that didn't register makes a broken card.
+    if (dotMapped) try {
         onStatus("Listing in playground registry…");
 
         // Metadata JSON — `name` falls back to the domain label when empty so
@@ -223,6 +225,9 @@ export async function deployFull(
         registryError = cause instanceof Error ? cause.message : String(cause);
         onStatus(`Registry listing failed — site still deployed. ${registryError}`);
         // Don't rethrow: the Bulletin store + domain already succeeded.
+    } else {
+        registryError =
+            "Skipped — the .dot name didn't register, so the registry has nothing to resolve.";
     }
 
     return {
