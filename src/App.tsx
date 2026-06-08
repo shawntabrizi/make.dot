@@ -468,6 +468,17 @@ export default function App() {
                 "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
             );
         }
+        // Images are stored on Bulletin (host-routed) so the deployed HTML can
+        // reference a CID rather than inline megabytes. That needs a host — show
+        // a clear message standalone instead of the raw SDK "Host provider
+        // unavailable" error.
+        if (!isInsideContainerSync()) {
+            throw new Error(
+                "Image upload requires running inside a Polkadot host (Desktop or Mobile) — " +
+                    "images are stored on Bulletin. You can edit and preview standalone; " +
+                    "open this app inside the host to upload and publish images.",
+            );
+        }
         // Every upload is optimized: downscaled to the largest dimension the
         // page can display (1280px) and re-encoded — images that already fit
         // pass through untouched. The byte budget is the smaller of the chain's
