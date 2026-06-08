@@ -6,12 +6,21 @@
 // Host/extension submission is live; allowance gating is enforced in App.tsx.
 
 import { calculateCid } from "@parity/product-sdk-cloud-storage";
-import { storeHTML } from "./lib/bulletin/store.ts";
+import { storeBytes, storeHTML } from "./lib/bulletin/store.ts";
 import { getEvmAddress } from "./lib/dotns/address.ts";
 import { registerDomain, checkDomainAvailability } from "./lib/dotns/register.ts";
 import { setContentHash } from "./lib/dotns/content-hash.ts";
+import { getRegistryContract } from "./lib/registry/contracts.ts";
 import { BULLETIN_GATEWAY } from "./lib/polkadot/constants.ts";
 import type { ActiveAccount } from "./account.ts";
+
+// Profile metadata listed in the playground registry. Mirrors playground-app's
+// shape — `name` required; `description` optional. Other fields the registry
+// accepts (repository, icon_cid, tag) aren't meaningful for a profile page.
+export interface DeployMetadata {
+    name: string;
+    description?: string;
+}
 
 export interface DeployPreview {
     kind: "preview";
@@ -35,6 +44,10 @@ export interface DeploySuccess {
     dotMapped: boolean;
     /** Reason DotNS failed, if it did. Null when dotMapped===true. */
     dotError: string | null;
+    /** True iff the site was published to the playground registry (shows in playground.dot's grid). */
+    listed: boolean;
+    /** Reason the registry publish failed, if it did. Null when listed===true. */
+    registryError: string | null;
 }
 
 export type StatusFn = (message: string) => void;
@@ -87,6 +100,7 @@ export async function deployFull(
     domain: string | null,
     account: ActiveAccount,
     onStatus: StatusFn,
+    metadata?: DeployMetadata,
 ): Promise<DeploySuccess> {
     const finalLabel = (domain ?? "").replace(/\.dot$/i, "") || deriveDomain(html.slice(0, 64));
 
@@ -141,6 +155,76 @@ export async function deployFull(
         // can show the gateway URL even when the name mapping fell over.
     }
 
+    // Phase 3 — playground-registry publish. Best-effort, same philosophy as
+    // DotNS: a failure here never masks the successful Bulletin store / domain
+    // registration above. On success the deployed profile shows up in
+    // playground.dot's registry grid. The account is mapped on-chain during the
+    // DotNS registerDomain step; if that was skipped/failed we still attempt
+    // (the account may be mapped from a prior run) and just capture any error.
+    let listed = false;
+    let registryError: string | null = null;
+    try {
+        onStatus("Listing in playground registry…");
+
+        // Metadata JSON — `name` falls back to the domain label when empty so
+        // the registry entry always has a usable display name.
+        const name = (metadata?.name ?? "").trim() || finalLabel;
+        const description = metadata?.description?.trim() || undefined;
+        const metadataBytes = new TextEncoder().encode(
+            JSON.stringify({ name, description }),
+        );
+
+        onStatus("Registry: storing metadata…");
+        const meta = await storeBytes({
+            bytes: metadataBytes,
+            signerAddress: account.address,
+            displayName: account.displayName,
+            label: "Metadata",
+            onStatus: (s) => onStatus(`Registry metadata: ${s}`),
+        });
+
+        onStatus("Registry: publishing…");
+        const registry = await getRegistryContract();
+        // publish(domain, metadata_cid, visibility, owner, modded_from,
+        //         is_moddable, is_dev_signer, opts). visibility=1 (public),
+        //         owner None, modded_from "", is_moddable false,
+        //         is_dev_signer false. Mirrors playground-app's runTx call;
+        //         the signer is passed explicitly via the trailing opts. The
+        //         contract handle is the generic fallback (codegen hasn't
+        //         augmented `publish`), so we type the call narrowly here.
+        const publish = (registry as unknown as {
+            publish: {
+                tx: (
+                    domain: string,
+                    metadataCid: string,
+                    visibility: number,
+                    owner: { isSome: boolean; value: string },
+                    moddedFrom: string,
+                    isModdable: boolean,
+                    isDevSigner: boolean,
+                    opts: { signer: typeof account.signer },
+                ) => Promise<{ ok: boolean }>;
+            };
+        }).publish;
+        const result = await publish.tx(
+            `${finalLabel}.dot`,
+            meta.cid,
+            1,
+            { isSome: false, value: "0x0000000000000000000000000000000000000000" },
+            "",
+            false,
+            false,
+            { signer: account.signer },
+        );
+        if (!result.ok) throw new Error("Registry publish transaction failed (result.ok=false)");
+
+        listed = true;
+    } catch (cause) {
+        registryError = cause instanceof Error ? cause.message : String(cause);
+        onStatus(`Registry listing failed — site still deployed. ${registryError}`);
+        // Don't rethrow: the Bulletin store + domain already succeeded.
+    }
+
     return {
         kind: "stored",
         bytes: stored.bytes,
@@ -152,5 +236,7 @@ export async function deployFull(
         blockNumber: stored.blockNumber,
         dotMapped,
         dotError,
+        listed,
+        registryError,
     };
 }

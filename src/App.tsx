@@ -69,6 +69,21 @@ function titleFromHtml(body: string): string {
 }
 type DeployResult = DeployPreview | DeploySuccess;
 
+// Registry metadata derived from the structured site content: name = first
+// heading, description = first paragraph. Both fall back to the rendered HTML's
+// <title> so markdown/html modes (no blocks) still get a name. An empty name is
+// fine — deployFull falls back to the domain label.
+function deriveMetadata(content: SiteContent, html: string): { name: string; description?: string } {
+    const headingBlock = content.blocks.find((b) => b.type === "heading");
+    const paragraphBlock = content.blocks.find((b) => b.type === "paragraph");
+    const name =
+        (headingBlock && "text" in headingBlock ? headingBlock.text : "").trim() ||
+        titleFromHtml(html);
+    const description =
+        paragraphBlock && "text" in paragraphBlock ? paragraphBlock.text.trim() : "";
+    return { name, description: description || undefined };
+}
+
 interface ProgressStep {
     readonly id: string;
     readonly label: string;
@@ -116,6 +131,14 @@ function stepForDeployStatus(message: string): number {
     if (message.startsWith("DotNS register:")) return 4;
     if (message.startsWith("DotNS resolver:")) return 7;
     if (message.startsWith("DotNS step failed")) return 7;
+    // Registry publish is the final phase — keep it on the last segment.
+    if (
+        message.startsWith("Listing in playground registry") ||
+        message.startsWith("Registry") ||
+        message.startsWith("Registry listing failed")
+    ) {
+        return 7;
+    }
     return 0;
 }
 
@@ -572,6 +595,7 @@ export default function App() {
                     domain || null,
                     activeAccount,
                     updateDeployStatus,
+                    deriveMetadata(content, html),
                 );
                 setResult(stored);
             } else {
@@ -1135,6 +1159,26 @@ export default function App() {
                                     access is host-routed).
                                 </p>
                             )}
+                            {result.kind === "stored" &&
+                                (result.listed ? (
+                                    <p className="result-note success">
+                                        Listed in playground registry ✓ — your site
+                                        appears in the playground.dot grid.
+                                    </p>
+                                ) : (
+                                    <div className="result-note">
+                                        <p>
+                                            Not listed in the playground registry —
+                                            the listing step failed. Your site is still
+                                            deployed and reachable via the links above.
+                                        </p>
+                                        {result.registryError && (
+                                            <pre className="error-block">
+                                                {result.registryError}
+                                            </pre>
+                                        )}
+                                    </div>
+                                ))}
                         </div>
                     )}
                     {deployError && (
