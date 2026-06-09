@@ -120,10 +120,16 @@ export async function deployFull(
     // actually went wrong and (where possible) what to do about it.
     let dotMapped = false;
     let dotError: string | null = null;
+    // Track the exact sub-step so a failure tells us WHERE (the on-screen hint
+    // and host-console only get the message string — the host bridge serializes
+    // Errors to `.toString()`, dropping the stack — so we carry both ourselves).
+    let dotStep = "starting";
     try {
+        dotStep = "getEvmAddress (ReviveApi.address)";
         onStatus("DotNS: resolving owner H160…");
         const ownerEvmAddress = await getEvmAddress(account.address);
 
+        dotStep = "checkDomainAvailability (dry-run recordExists)";
         onStatus("DotNS: checking domain availability…");
         const available = await checkDomainAvailability(finalLabel, account.address);
         if (!available) {
@@ -131,26 +137,41 @@ export async function deployFull(
         }
 
         // Submission gating (host allowances) lives in App.tsx deploy().
+        dotStep = "registerDomain (map_account + commit + register)";
         await registerDomain({
             label: finalLabel,
             ownerEvmAddress,
             signerAddress: account.address,
             signer: account.signer,
-            onStatus: (s) => onStatus(`DotNS register: ${s}`),
+            onStatus: (s) => {
+                dotStep = `registerDomain: ${s}`;
+                onStatus(`DotNS register: ${s}`);
+            },
         });
 
+        dotStep = "setContentHash";
         await setContentHash({
             label: finalLabel,
             cidString: stored.cid,
             signerAddress: account.address,
             signer: account.signer,
-            onStatus: (s) => onStatus(`DotNS resolver: ${s}`),
+            onStatus: (s) => {
+                dotStep = `setContentHash: ${s}`;
+                onStatus(`DotNS resolver: ${s}`);
+            },
         });
 
         dotMapped = true;
     } catch (cause) {
-        dotError = cause instanceof Error ? cause.message : String(cause);
-        onStatus(`DotNS step failed — Bulletin store still succeeded. ${dotError}`);
+        // Log step + full stack AS A STRING. Passing the Error object loses the
+        // stack across the host's console bridge (it shows only the message), so
+        // serialize `.stack` explicitly. This is what tells a client-side glitch
+        // apart from a real on-chain dispatch error.
+        const stack = cause instanceof Error ? (cause.stack ?? cause.message) : String(cause);
+        console.error(`DotNS phase failed at step [${dotStep}]:\n${stack}`);
+        const rawMessage = cause instanceof Error ? cause.message : String(cause);
+        dotError = `[step: ${dotStep}] ${rawMessage}`;
+        onStatus(`DotNS step failed — Bulletin store still succeeded. ${rawMessage}`);
         // Don't rethrow: surface the partial-success to the caller so the UI
         // can show the gateway URL even when the name mapping fell over.
     }
@@ -204,7 +225,11 @@ export async function deployFull(
                     moddedFrom: string,
                     isModdable: boolean,
                     isDevSigner: boolean,
-                    opts: { signer: typeof account.signer },
+                    opts: {
+                        signer: typeof account.signer;
+                        gasLimit?: { ref_time: bigint; proof_size: bigint };
+                        storageDepositLimit?: bigint;
+                    },
                 ) => Promise<{ ok: boolean }>;
             };
         }).publish;
@@ -216,12 +241,24 @@ export async function deployFull(
             "",
             false,
             false,
-            { signer: account.signer },
+            {
+                signer: account.signer,
+                // Override ContractManager's auto-estimator: it returns a tight,
+                // margin-free weight → the publish (a heavy PolkaVM storage write,
+                // comparable to playground-app's setUsername) hit Revive.OutOfGas.
+                // Give it (just under) AH-Next's per-normal-extrinsic ceiling
+                // (ref_time ~1.599e12 / proof_size ~8.39e6) for maximum headroom;
+                // unused weight isn't charged. storageDepositLimit mirrors the
+                // proven DotNS register value.
+                gasLimit: { ref_time: 1_590_000_000_000n, proof_size: 8_000_000n },
+                storageDepositLimit: 2_000_000_000_000n,
+            },
         );
         if (!result.ok) throw new Error("Registry publish transaction failed (result.ok=false)");
 
         listed = true;
     } catch (cause) {
+        console.error("Registry phase failed:", cause);
         registryError = cause instanceof Error ? cause.message : String(cause);
         onStatus(`Registry listing failed — site still deployed. ${registryError}`);
         // Don't rethrow: the Bulletin store + domain already succeeded.

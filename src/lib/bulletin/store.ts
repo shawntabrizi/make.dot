@@ -1,14 +1,10 @@
 // Bulletin storage flow via the host-routed CloudStorageClient:
 // validate size → store().send() → receipt with CID + block.
 //
-// No per-account authorization pre-flight is needed: the app requests a
-// BulletinAllowance via signerManager.requestResourceAllocation() on connect,
-// and the host transparently authorizes Bulletin stores through that allowance.
-//
 // The client is a lazy singleton built once and reused. Its signer is resolved
-// per-call from the currently-active account (host / extension / dev) so the
-// same client signs with whichever source the user selected. There is no
-// `signer` param on storeBytes / storeHTML.
+// per-call from the currently-active account (the //Bob dev account) via the
+// module-level holder in account.ts. There is no `signer` param on
+// storeBytes / storeHTML.
 
 import {
     CloudStorageClient,
@@ -39,8 +35,7 @@ export interface StoreHTMLResult {
 
 // Promise-based singleton so concurrent first callers share one
 // CloudStorageClient.create() instead of each spinning up their own. The lazy
-// signer defers signer resolution to each store call, picking up account
-// switches (host → extension → dev) automatically.
+// signer resolves the //Bob dev account from account.ts on each store call.
 let clientPromise: Promise<CloudStorageClient> | null = null;
 
 function getCloudStorageClient(): Promise<CloudStorageClient> {

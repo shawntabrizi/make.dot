@@ -1,12 +1,31 @@
 // Commit-reveal DotNS registration flow. ENS-style — front-running protection
 // via a 60s commitment age.
 
-import { encodeFunctionData, decodeFunctionResult } from "viem";
+import { encodeFunctionData, decodeFunctionResult, decodeErrorResult } from "viem";
 import type { PolkadotSigner } from "polkadot-api";
 import { DOTNS_CONTRACTS, NATIVE_TO_ETH_RATIO } from "../polkadot/constants.ts";
 import { POP_RULES_ABI, REGISTRAR_CONTROLLER_ABI, REGISTRY_ABI } from "./abis.ts";
 import { labelToFullName, namehash } from "./namehash.ts";
 import { dryRunContractCall, ensureAccountMapped, submitContractCall } from "./contracts.ts";
+
+// Turn pallet-revive revert bytes into a human reason. Handles the standard
+// Solidity `Error(string)` / `Panic(uint256)` (viem knows these built-in) and
+// any custom errors declared in the ABI; otherwise surfaces the 4-byte selector
+// so it can be looked up. Lets us fail the register pre-flight with the ACTUAL
+// reason instead of a bare "ContractReverted".
+function decodeRevertReason(returnData: `0x${string}`): string {
+    if (!returnData || returnData === "0x") {
+        return "contract reverted without a reason string";
+    }
+    try {
+        const decoded = decodeErrorResult({ abi: REGISTRAR_CONTROLLER_ABI, data: returnData });
+        if (decoded.errorName === "Error") return String(decoded.args?.[0] ?? "Error");
+        const args = (decoded.args ?? []) as unknown[];
+        return `${decoded.errorName}(${args.map(String).join(", ")})`;
+    } catch {
+        return `unrecognised revert (selector ${returnData.slice(0, 10)})`;
+    }
+}
 
 function generateSecret(): `0x${string}` {
     const bytes = crypto.getRandomValues(new Uint8Array(32));
@@ -171,7 +190,13 @@ export async function registerDomain(params: {
     onStatus?.("Pricing domain…");
     const priceWei = await getDomainPrice(label, ownerEvmAddress, signerAddress);
     const bufferedWei = (priceWei * 110n) / 100n; // 10% buffer per DotNS SDK
-    const bufferedNative = bufferedWei / NATIVE_TO_ETH_RATIO;
+    // Ceil, not floor: BigInt division floors, so any positive price below the
+    // ratio (<1e8 wei) would round to 0 native → underpay → revert. Round up so
+    // a positive price always pays at least 1 planck (a free name stays 0).
+    const bufferedNative =
+        bufferedWei === 0n
+            ? 0n
+            : (bufferedWei + NATIVE_TO_ETH_RATIO - 1n) / NATIVE_TO_ETH_RATIO;
 
     const registerData = encodeFunctionData({
         abi: REGISTRAR_CONTROLLER_ABI,
@@ -184,6 +209,15 @@ export async function registerDomain(params: {
         registerData,
         bufferedNative,
     );
+    // Pre-flight: if the dry-run reverts, submitting on-chain will revert the
+    // same way (identical value + data). Fail now with the decoded reason
+    // instead of burning a real tx + fee on a doomed register.
+    if (!registerGas.success) {
+        throw new Error(
+            `Registration would revert: ${decodeRevertReason(registerGas.returnData)} ` +
+                `(label "${label}", price ${bufferedWei} wei → ${bufferedNative} native).`,
+        );
+    }
     await submitContractCall(
         DOTNS_CONTRACTS.registrarController,
         signer,

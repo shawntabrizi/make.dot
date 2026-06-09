@@ -107,34 +107,6 @@ body {
     color: color-mix(in srgb, var(--site-foreground, #f5f5f5), transparent 60%);
     margin: 16px 0;
 }
-.image-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
-.image-upload {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    background: rgba(0,0,0,0.4);
-    border: 1px solid var(--chrome-border);
-    border-radius: 999px;
-    color: var(--chrome-text);
-    font-size: 12px;
-    cursor: pointer;
-    align-self: flex-start;
-    transition: border-color 0.15s, background 0.15s;
-}
-.image-upload:hover { border-color: rgba(255,255,255,0.3); }
-.image-upload input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-.image-upload-error {
-    margin: 0;
-    padding: 8px 10px;
-    background: rgba(248, 113, 113, 0.08);
-    border: 1px solid rgba(248, 113, 113, 0.3);
-    border-radius: 6px;
-    color: var(--danger);
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-}
 .site-divider { border: 0; border-top: 1px solid var(--site-divider, rgba(255,255,255,0.15)); margin: 32px 0; }
 /* Same treatment as the artifact's `footer` rule in shellCss. */
 .site-footer { margin-top: 64px; opacity: 0.4; font-size: 12px; }
@@ -601,67 +573,6 @@ body {
     outline: none;
 }
 .sheet-field input:focus { border-color: var(--accent); }
-/* Media tile: the image IS the picker. Empty = dropzone, filled = preview
-   with a Replace chip, uploading = progress in place. */
-.sheet-media {
-    position: relative;
-    display: block;
-    height: 160px;
-    border: 1px dashed var(--chrome-border);
-    border-radius: 12px;
-    background: rgba(0,0,0,0.25);
-    overflow: hidden;
-    cursor: pointer;
-    transition: border-color 0.15s;
-}
-.sheet-media:hover { border-color: rgba(255,255,255,0.3); }
-.sheet-media.has-img { border-style: solid; }
-.sheet-media input[type="file"] {
-    position: absolute;
-    width: 1px; height: 1px;
-    opacity: 0;
-    pointer-events: none;
-}
-.sheet-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.sheet-media-empty {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 16px;
-    text-align: center;
-    color: var(--chrome-text2);
-    font-size: 13px;
-}
-.sheet-media-empty .deploy-progress { width: 100%; }
-.sheet-media-note { font-size: 11px; opacity: 0.8; }
-.sheet-media-chip {
-    position: absolute;
-    right: 8px; bottom: 8px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    background: rgba(0,0,0,0.6);
-    color: #fff;
-    font-size: 11px;
-    font-weight: 600;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-}
-.sheet-link-toggle {
-    align-self: flex-start;
-    background: none;
-    border: 0;
-    padding: 0;
-    color: var(--chrome-text2);
-    font: inherit;
-    font-size: 12px;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    cursor: pointer;
-}
-.sheet-link-toggle:hover { color: var(--chrome-text); }
 .sheet-actions { display: flex; gap: 10px; margin-top: 6px; }
 .sheet-delete {
     flex: 1;
@@ -1111,4 +1022,31 @@ body {
        wrap into, instead of fighting the fixed label column. */
     .row-line { flex-direction: column; gap: 2px; }
     .row-label { flex: none; }
+}
+
+/* Transient toast (e.g. "Link copied"). Fixed near the bottom, above the action
+   bar + safe-area inset, centred, and pointer-transparent so it never blocks a
+   tap underneath it. */
+.toast {
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: calc(96px + env(safe-area-inset-bottom) + var(--vv-bottom, 0px) + var(--vv-bottom-fallback, 0px));
+    z-index: 60;
+    max-width: calc(100vw - 32px);
+    padding: 10px 16px;
+    background: var(--chrome-surface);
+    color: var(--chrome-text);
+    border: 1px solid var(--chrome-border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    font-size: 14px;
+    font-weight: 600;
+    pointer-events: none;
+    animation: toast-in 0.16s ease-out;
+}
+
+@keyframes toast-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
 }

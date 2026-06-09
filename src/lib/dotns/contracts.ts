@@ -56,13 +56,91 @@ function chargedStorageDeposit(value: unknown): bigint {
     return toBigInt(value);
 }
 
+// ── Transaction submission with stale-nonce retry ────────────────────────────
+//
+// AH-Next's known "nonce_stale flake": after a sequence of extrinsics (and
+// especially after the ~66s commit→reveal idle wait), the chainHead view PAPI
+// reads the nonce from can lag behind the real chain tip, so the next tx is
+// signed with an already-consumed nonce → `InvalidTransaction::Stale`. The
+// reference deployers (bulletin-deploy `signAndSubmitWithRetry`, playground-cli
+// `atBest` nonce) handle this by rebuilding + resubmitting with a fresh nonce
+// and a jittered backoff that lets the view catch up. We mirror that here.
+
+const MAX_TX_ATTEMPTS = 5;
+
+// Mirror of bulletin-deploy's dotnsRetryBackoffMs: full-ish jitter (50–100% of
+// an exponential ceiling, base 400ms, capped 6s) so concurrent retries don't
+// re-collide on the same nonce tick.
+function retryBackoffMs(attempt: number): number {
+    const ceil = Math.min(400 * 2 ** (attempt - 1), 6000);
+    return Math.round(ceil * (0.5 + Math.random() * 0.5));
+}
+
+// Whether a failed submission is safe to resubmit with a fresh nonce.
+//
+// CRITICAL: on-chain dispatch failures are TERMINAL and must never be retried.
+// submit-and-wait wraps those as `Transaction failed: <dispatchError JSON>`
+// (this covers ContractReverted, Revive.OutOfGas, name-taken, expired
+// commitment, …). Excluding that prefix FIRST is what stops the substring
+// checks below from false-matching a module-error whose serialized JSON merely
+// happens to contain "stale"/"dropped" — and, just as importantly, it
+// guarantees every case we DO retry is one where the extrinsic was never
+// included (rejected at validation or dropped from the pool). That makes the
+// rebuild-with-fresh-nonce resubmit idempotent: it cannot double-execute an
+// extrinsic that actually landed (which is the only way `register` could be
+// re-run and revert with "name taken").
+function isRetriableTxError(message: string): boolean {
+    if (message.startsWith("Transaction failed:")) return false;
+    const m = message.toLowerCase();
+    return (
+        // InvalidTransaction::Stale / Future — nonce signed against a lagging
+        // chainHead view; rejected at validation, never included. (The
+        // stale-nonce flake this retry exists for.)
+        m.includes("stale") ||
+        m.includes("future") ||
+        // Pool dropped / declared the tx invalid → not included.
+        m.includes("transaction dropped") ||
+        m.includes("transaction invalid")
+    );
+}
+
+// Build-and-submit with stale-nonce retry. `buildTx` is called fresh per attempt
+// so PAPI recomputes the nonce against the current view each time.
+async function submitTxWithRetry(
+    buildTx: () => Parameters<typeof submitAndWait>[0],
+    signer: PolkadotSigner,
+    onStatus: ((status: DeployStatus) => void) | undefined,
+    label: string,
+): Promise<{ blockHash: string; blockNumber: number }> {
+    for (let attempt = 1; ; attempt++) {
+        try {
+            return await submitAndWait(buildTx(), signer, onStatus);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            if (attempt < MAX_TX_ATTEMPTS && isRetriableTxError(message)) {
+                const delay = retryBackoffMs(attempt);
+                console.warn(
+                    `[dotns] ${label} attempt ${attempt}/${MAX_TX_ATTEMPTS} failed ` +
+                        `(${message.slice(0, 100)}); retrying in ${delay}ms with a fresh nonce`,
+                );
+                // Re-signing happens on the next iteration; surface it as another
+                // "signing" tick so the UI doesn't look frozen.
+                onStatus?.("signing");
+                await new Promise((r) => setTimeout(r, delay));
+                continue;
+            }
+            throw err;
+        }
+    }
+}
+
 export async function ensureAccountMapped(
     signerAddress: string,
     signer: PolkadotSigner,
 ): Promise<void> {
     if (mappedAccounts.has(signerAddress)) return;
 
-    const { unsafeApi, api } = getAssetHubClient();
+    const { unsafeApi } = await getAssetHubClient();
 
     // Probe: a dry-run against the zero address. If the account is unmapped,
     // pallet-revive returns AccountUnmapped — much faster than checking storage.
@@ -95,8 +173,12 @@ export async function ensureAccountMapped(
         // fall through to mapping
     }
 
-    const tx = api.tx.Revive.map_account();
-    await submitAndWait(tx, signer);
+    await submitTxWithRetry(
+        () => unsafeApi.tx.Revive.map_account(),
+        signer,
+        undefined,
+        "map_account",
+    );
 
     // Poll until the mapping propagates (usually 1-2 blocks).
     for (let attempt = 0; attempt < 20; attempt++) {
@@ -140,7 +222,7 @@ export async function dryRunContractCall(
     encodedData: `0x${string}`,
     value: bigint = 0n,
 ): Promise<DryRunResult> {
-    const { unsafeApi } = getAssetHubClient();
+    const { unsafeApi } = await getAssetHubClient();
 
     const dryRun = await unsafeApi.apis.ReviveApi.call(
         callerAddress,
@@ -186,7 +268,7 @@ export async function submitContractCall(
     storageDepositEstimate?: bigint,
     onStatus?: (status: DeployStatus) => void,
 ): Promise<{ blockHash: string; blockNumber: number }> {
-    const { api } = getAssetHubClient();
+    const { unsafeApi } = await getAssetHubClient();
 
     const refTime = gasEstimate ? gasEstimate.refTime * GAS_MULTIPLIER : DEFAULT_REF_TIME;
     const proofSize = gasEstimate
@@ -198,15 +280,21 @@ export async function submitContractCall(
         : MIN_STORAGE_DEPOSIT;
     if (storageDeposit < MIN_STORAGE_DEPOSIT) storageDeposit = MIN_STORAGE_DEPOSIT;
 
-    const tx = api.tx.Revive.call({
-        // Descriptor types `dest` as SizedHex<20> (branded plain string), not
-        // a Binary class instance. Pallet-revive accepts the lowercase hex.
-        dest: contractAddress.toLowerCase() as `0x${string}`,
-        value,
-        weight_limit: { ref_time: refTime, proof_size: proofSize },
-        storage_deposit_limit: storageDeposit,
-        data: Binary.fromHex(encodedData),
-    });
-
-    return submitAndWait(tx, signer, onStatus);
+    // Rebuilt fresh on each retry attempt so PAPI recomputes the nonce against
+    // the current chainHead view (the stale-nonce flake fix).
+    return submitTxWithRetry(
+        () =>
+            unsafeApi.tx.Revive.call({
+                // `dest` is a SizedHex<20> (branded plain string), not a Binary
+                // class instance. Pallet-revive accepts the lowercase hex.
+                dest: contractAddress.toLowerCase() as `0x${string}`,
+                value,
+                weight_limit: { ref_time: refTime, proof_size: proofSize },
+                storage_deposit_limit: storageDeposit,
+                data: Binary.fromHex(encodedData),
+            }),
+        signer,
+        onStatus,
+        `Revive.call(${contractAddress.slice(0, 10)}…)`,
+    );
 }

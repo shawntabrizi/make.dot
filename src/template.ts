@@ -1,7 +1,10 @@
 // The site model + the renderer. `renderHtml(content)` returns a complete,
-// self-contained HTML document — inline CSS, no external assets, no JS — so
-// the result is a single byte blob we can hash and store in one
-// TransactionStorage.store call.
+// self-contained HTML document — inline CSS, no external assets — so the result
+// is a single byte blob we can hash and store in one TransactionStorage.store
+// call. The only script is a tiny link-click fallback (LINK_FALLBACK_JS): inside
+// a Polkadot host webview `target="_blank"` navigation is blocked and a tapped
+// link would do nothing, so we copy the URL + toast instead. Normal web visitors
+// still navigate as usual.
 
 /** Image sizes — always rendered centered. small=256px, medium=512px, large=full width. */
 export type ImageVariant = "small" | "medium" | "large";
@@ -134,6 +137,36 @@ function safeUrl(raw: string): string {
     if (v.startsWith("/") || v.startsWith("./") || v.startsWith("#")) return escapeHtml(v);
     return "#";
 }
+
+// Link-click fallback injected into the deployed page. On click we try a normal
+// new-tab navigation; if the host blocks it (`window.open` returns null inside a
+// webview), we copy the URL to the clipboard and flash a toast — so social/
+// profile links are never a dead tap inside the Polkadot app. In a regular
+// browser `window.open` succeeds and nothing is copied. Kept tiny + dependency-
+// free; the toast element is created and styled inline on demand.
+export const LINK_FALLBACK_JS = `(function(){
+  function toast(msg){
+    var t=document.createElement('div');
+    t.textContent=msg;
+    t.setAttribute('role','status');
+    t.style.cssText='position:fixed;left:50%;bottom:24px;transform:translateX(-50%);z-index:2147483647;max-width:calc(100vw - 32px);padding:10px 16px;background:rgba(20,22,28,0.95);color:#fff;border-radius:12px;font:600 14px/1.3 system-ui,-apple-system,sans-serif;box-shadow:0 8px 24px rgba(0,0,0,0.35);pointer-events:none;';
+    document.body.appendChild(t);
+    setTimeout(function(){t.remove();},1800);
+  }
+  document.addEventListener('click',function(e){
+    var a=e.target&&e.target.closest&&e.target.closest('a[href]');
+    if(!a)return;
+    var href=a.getAttribute('href');
+    if(!href||href.charAt(0)==='#')return;
+    e.preventDefault();
+    var win=null;
+    try{win=window.open(href,'_blank','noopener');}catch(_){}
+    if(win)return;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(href).then(function(){toast('Link copied');},function(){toast(href);});
+    }else{toast(href);}
+  });
+})();`;
 
 function renderBlock(block: Block): string {
     switch (block.type) {
@@ -321,6 +354,9 @@ export function renderHtmlParts(content: SiteContent): DocumentParts {
         title: escapeHtml(firstHeading?.text || "hello"),
         css: shellCss(content, features),
         bodyHtml: wrapMain(blocks),
+        // Link-click fallback so links aren't a dead tap inside a host webview.
+        // Always present (the footer link alone justifies it).
+        js: LINK_FALLBACK_JS,
     };
 }
 

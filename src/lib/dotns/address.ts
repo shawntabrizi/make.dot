@@ -10,7 +10,7 @@ export async function getEvmAddress(ss58Address: string): Promise<`0x${string}`>
     const cached = cache.get(ss58Address);
     if (cached) return cached;
 
-    const { unsafeApi } = getAssetHubClient();
+    const { unsafeApi } = await getAssetHubClient();
     const result = await unsafeApi.apis.ReviveApi.address(ss58Address);
     const hex = (result as { asHex?: () => string })?.asHex?.() ?? (result as string);
 

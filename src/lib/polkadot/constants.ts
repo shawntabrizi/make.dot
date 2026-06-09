@@ -8,14 +8,11 @@
 // transport. BULLETIN_GATEWAY is still used to construct IPFS gateway URLs.
 export const BULLETIN_GATEWAY = "https://paseo-bulletin-next-ipfs.polkadot.io/ipfs/";
 
-export const ASSET_HUB_RPC = "wss://paseo-asset-hub-next-rpc.polkadot.io";
-
-// Asset Hub Next genesis hash (`.papi/polkadot-api.json` "pah".genesis).
-// Used to host-route the chain provider via `createPapiProvider`. This testnet
-// resets periodically, rotating its genesis — re-sync this with polkadot-api.json
-// after any `papi update`.
-export const ASSET_HUB_GENESIS =
-    "0xbf0488dbe9daa1de1c08c5f743e26fdc2a4ecd74cf87dd1b4b1eeb99ae4ef19f";
+// Note: ASSET_HUB_RPC / ASSET_HUB_GENESIS were removed — the Asset Hub client is
+// now built via `getChainAPI("paseo")` (see clients.ts), which resolves the
+// chain through the host using the `paseo_asset_hub` descriptor's own genesis.
+// On a testnet reset, re-run `npx papi update`; the descriptor carries the
+// genesis, so there's no hash to hand-sync here anymore.
 
 // DotNS deployed contract addresses (source: bulletin-deploy/assets/environments.json).
 // Maps: DOTNS_REGISTRY / DOTNS_REGISTRAR / DOTNS_REGISTRAR_CONTROLLER /
@@ -30,8 +27,12 @@ export const DOTNS_CONTRACTS = {
     popRules: "0x4909bFb3f4Fd86244abD6430fDfA0Ce5C91aD0c4",
 } as const;
 
-/** 1 PAS (native, 12 decimals) = 1_000_000 Wei (EVM, 18 decimals). */
-export const NATIVE_TO_ETH_RATIO = 1_000_000n;
+// Wei (EVM, 18 decimals) per native planck. Paseo Asset Hub's native token has
+// **10 decimals**, so 1 PAS = 1e10 native = 1e18 Wei → 1 native planck = 1e8 Wei.
+// (Source of truth: bulletin-deploy environments.json `paseo-next-v2`
+// `nativeToEthRatio: 100000000`.) An earlier value of 1e6 assumed 12-decimal
+// native and made `register` send 100× the correct payment → ContractReverted.
+export const NATIVE_TO_ETH_RATIO = 100_000_000n;
 
 /** PAS faucet for paying contract fees on Asset Hub Next. */
 export const PAS_FAUCET_URL = "https://faucet.polkadot.io/";

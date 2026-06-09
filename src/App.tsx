@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Editable } from "./Editable.tsx";
 
 // Lazy: CodeMirror is its own chunk, fetched only when md/html mode is opened.
@@ -29,18 +29,9 @@ import {
 import {
     type ActiveAccount,
     getDevAccount,
-    hasInjectedExtension,
     setCurrentAccount,
-    tryExtensionAccount,
-    tryHostAccount,
 } from "./account.ts";
 import { isInsideContainerSync } from "@parity/product-sdk-host";
-import {
-    MAX_TX_BYTES,
-    storeBytes,
-} from "./lib/bulletin/store.ts";
-import { MAX_IMAGE_DIMENSION, resizeImageToFit } from "./image-resize.ts";
-import { signerManager, useResourceAllocationState } from "./signer.ts";
 import { TEMPLATES, type Template } from "./templates.ts";
 import {
     blocksToMarkdown,
@@ -100,22 +91,6 @@ const DEPLOY_STEPS: readonly ProgressStep[] = [
     { id: "register", label: "Register" },
     { id: "link", label: "Link" },
 ];
-
-const UPLOAD_STEPS: readonly ProgressStep[] = [
-    { id: "prepare", label: "Prepare" },
-    { id: "sign", label: "Sign" },
-    { id: "broadcast", label: "Broadcast" },
-    { id: "in-block", label: "In Block" },
-    { id: "finalized", label: "Finalized" },
-];
-
-function stepForUploadStatus(message: string): number {
-    if (message.startsWith("signing")) return 1;
-    if (message.startsWith("broadcasting")) return 2;
-    if (message.startsWith("in-block")) return 3;
-    if (message.startsWith("finalized")) return 4;
-    return 0;
-}
 
 function stepForDeployStatus(message: string): number {
     if (message.startsWith("Bulletin:")) return 1;
@@ -232,52 +207,29 @@ export default function App() {
     const toggleMenu = (menu: ActionMenu) =>
         setOpenMenu((prev) => (prev === menu ? null : menu));
 
+    // Transient toast (e.g. "Link copied"). Auto-clears after a moment; a ref to
+    // the pending timer prevents overlapping toasts from cutting each other off.
+    const [toast, setToast] = useState<string | null>(null);
+    const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const showToast = useCallback((message: string) => {
+        setToast(message);
+        if (toastTimer.current) clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(null), 1800);
+    }, []);
+
     // Mirror the host's light/dark theme onto <html data-theme>. No-op (stays
     // dark) when running standalone with no host transport.
     useHostTheme();
 
-    // Signer state — Bob default, owned-account opt-in.
-    const [useOwnedAccount, setUseOwnedAccount] = useState(false);
-    const [hostAccount, setHostAccount] = useState<ActiveAccount | null>(null);
-    const [extensionAccount, setExtensionAccount] = useState<ActiveAccount | null>(null);
-    const [resolvingOwned, setResolvingOwned] = useState(false);
-    const [ownedError, setOwnedError] = useState<string | null>(null);
-    // Host resource grants — the deploy gate for host-sourced accounts needs
-    // BulletinAllowance + SmartContractAllowance both "Allocated".
-    const resourceState = useResourceAllocationState();
-    const hostAllowancesGranted = useMemo(() => {
-        const allocated = (resource: string) =>
-            resourceState.entries.some(
-                (e) => e.resource === resource && e.outcome === "Allocated",
-            );
-        return allocated("BulletinAllowance") && allocated("SmartContractAllowance");
-    }, [resourceState]);
-
-    const devAccount = useMemo(() => getDevAccount(), []);
-    const activeAccount: ActiveAccount | null = useOwnedAccount
-        ? extensionAccount ?? hostAccount
-        : devAccount;
+    // Signer — always the //Bob dev account. (The host/extension signing
+    // options were removed; deploy signs with //Bob.)
+    const activeAccount: ActiveAccount = useMemo(() => getDevAccount(), []);
 
     // Mirror the active account into the module-level holder so the
-    // CloudStorageClient's lazy signer (lib/bulletin/store.ts) signs with
-    // whichever source — host / extension / dev — is currently selected.
+    // CloudStorageClient's lazy signer (lib/bulletin/store.ts) picks it up.
     useEffect(() => {
         setCurrentAccount(activeAccount);
     }, [activeAccount]);
-
-    useEffect(() => {
-        if (!useOwnedAccount || hostAccount || extensionAccount) return;
-        setResolvingOwned(true);
-        setOwnedError(null);
-        tryHostAccount()
-            .then((account) => {
-                if (account) setHostAccount(account);
-            })
-            .catch((cause) => {
-                setOwnedError(cause instanceof Error ? cause.message : String(cause));
-            })
-            .finally(() => setResolvingOwned(false));
-    }, [useOwnedAccount, hostAccount, extensionAccount]);
 
     // Debounced draft autosave — every edit lands in localStorage shortly after.
     const draft: Draft = { mode, content, markdownText, htmlText, cssText, jsText };
@@ -464,92 +416,6 @@ export default function App() {
         }
     };
 
-    const uploadImage = async (
-        file: File,
-        onStatus: (msg: string) => void,
-    ): Promise<string> => {
-        if (!activeAccount) {
-            throw new Error(
-                "Sign in first — pick //Bob in the Deploy panel, or connect a wallet.",
-            );
-        }
-        // Images are stored on Bulletin (host-routed) so the deployed HTML can
-        // reference a CID rather than inline megabytes. That needs a host — show
-        // a clear message standalone instead of the raw SDK "Host provider
-        // unavailable" error.
-        if (!isInsideContainerSync()) {
-            throw new Error(
-                "Image upload requires running inside a Polkadot host (Desktop or Mobile) — " +
-                    "images are stored on Bulletin. You can edit and preview standalone; " +
-                    "open this app inside the host to upload and publish images.",
-            );
-        }
-        // Every upload is optimized: downscaled to the largest dimension the
-        // page can display (1280px) and re-encoded — images that already fit
-        // pass through untouched. The byte budget is the smaller of the chain's
-        // per-tx cap and the account authorization (chain cap even when the
-        // auth query failed).
-        const uploadLimit = MAX_TX_BYTES;
-        onStatus("Optimizing image…");
-        const resized = await resizeImageToFit(file, Math.floor(uploadLimit * 0.95));
-        const bytes = resized.bytes;
-        const label = `Image (${resized.filename || "untitled"})`;
-        onStatus(
-            resized.finalBytes !== resized.originalBytes
-                ? `Optimized ${(resized.originalBytes / 1024).toFixed(0)} KB → ${(resized.finalBytes / 1024).toFixed(0)} KB. Uploading…`
-                : "Uploading to Bulletin…",
-        );
-        const stored = await storeBytes({
-            bytes,
-            signerAddress: activeAccount.address,
-            displayName: activeAccount.displayName,
-            label,
-            onStatus,
-        });
-        return stored.ipfsUrl;
-    };
-
-    // Upload state lives HERE, keyed by block id — not in the bottom sheet.
-    // Uploads outlive the sheet (close/reopen mid-upload keeps progress
-    // visible) and completion patches the CURRENT block, so edits made while
-    // uploading aren't reverted by a stale copy.
-    const [uploads, setUploads] = useState<Record<string, string>>({});
-    const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
-    const startImageUpload = async (blockId: string, file: File) => {
-        if (uploads[blockId]) return; // one upload per block at a time
-        setUploadErrors(({ [blockId]: _drop, ...rest }) => rest);
-        setUploads((prev) => ({ ...prev, [blockId]: "Reading file…" }));
-        try {
-            const url = await uploadImage(file, (msg) =>
-                setUploads((prev) => ({ ...prev, [blockId]: msg })),
-            );
-            updateBlock(blockId, (b) =>
-                b.type === "image" ? { ...b, url, alt: b.alt || file.name } : b,
-            );
-        } catch (cause) {
-            setUploadErrors((prev) => ({
-                ...prev,
-                [blockId]: cause instanceof Error ? cause.message : String(cause),
-            }));
-        } finally {
-            setUploads(({ [blockId]: _drop, ...rest }) => rest);
-        }
-    };
-
-    const connectExtension = async () => {
-        setOwnedError(null);
-        try {
-            const account = await tryExtensionAccount();
-            if (account) setExtensionAccount(account);
-            else
-                setOwnedError(
-                    "No browser wallet found. Install Talisman, SubWallet, or Polkadot.js — or untick the box to deploy as //Bob.",
-                );
-        } catch (cause) {
-            setOwnedError(cause instanceof Error ? cause.message : String(cause));
-        }
-    };
-
     const deploy = async () => {
         setBusy(true);
         setResult(null);
@@ -562,12 +428,11 @@ export default function App() {
         };
         try {
             const html = currentHtml();
-            const source = activeAccount?.source;
 
             // Chain access (Bulletin store + DotNS) is host-routed and requires
             // running inside a Polkadot host. Show a clear message instead of
             // letting the SDK throw the raw "Host provider unavailable" error.
-            if (activeAccount && !isInsideContainerSync()) {
+            if (!isInsideContainerSync()) {
                 const preview = await previewDeploy(html, domain || null);
                 setResult(preview);
                 setDeployError(
@@ -579,34 +444,17 @@ export default function App() {
                 return;
             }
 
-            // dev + extension + host all submit for real via deployFull.
-            // - extension: no host allowance model — Bulletin authorization +
-            //   PAS funds are checked at submit time inside deployFull (which
-            //   throws clear faucet/funds errors).
-            // - host: gated on the host having granted both allowances; if not,
-            //   we surface a clear message instead of silently downgrading to a
-            //   preview.
-            // - anything else (no signer): preview only.
-            if (source === "host" && !hostAllowancesGranted) {
-                throw new Error(
-                    "The host hasn't granted the Bulletin and smart-contract " +
-                        "allowances needed to deploy yet. Approve the allocation " +
-                        "request in your Polkadot host, then retry.",
-                );
-            }
-            if (activeAccount) {
-                const stored = await deployFull(
-                    html,
-                    domain || null,
-                    activeAccount,
-                    updateDeployStatus,
-                    deriveMetadata(content, html),
-                );
-                setResult(stored);
-            } else {
-                const preview = await previewDeploy(html, domain || null);
-                setResult(preview);
-            }
+            // //Bob signs the real chain submissions (Bulletin store + DotNS).
+            // PAS funds / Bulletin authorization are checked at submit time
+            // inside deployFull, which throws clear errors on failure.
+            const stored = await deployFull(
+                html,
+                domain || null,
+                activeAccount,
+                updateDeployStatus,
+                deriveMetadata(content, html),
+            );
+            setResult(stored);
         } catch (cause) {
             setDeployError(cause instanceof Error ? cause.message : String(cause));
         } finally {
@@ -621,12 +469,7 @@ export default function App() {
         isEditing && mode === "blocks"
             ? content.blocks.find((b) => b.id === editingBlockId) ?? null
             : null;
-    const canDeploy =
-        !busy &&
-        activeAccount !== null &&
-        !(activeAccount.source === "host" && !hostAllowancesGranted);
-    const showOwnedHint =
-        useOwnedAccount && !hostAccount && !extensionAccount && !resolvingOwned;
+    const canDeploy = !busy;
 
     const colors = siteColors(content.background);
     const foreground = content.textColor ?? colors.foreground;
@@ -642,6 +485,11 @@ export default function App() {
 
     return (
         <>
+            {toast && (
+                <div className="toast" role="status" aria-live="polite">
+                    {toast}
+                </div>
+            )}
             {mode !== "blocks" &&
                 (isEditing ? (
                     <main className="code-pane">
@@ -718,7 +566,7 @@ export default function App() {
                             onUpdate={(b) => updateBlock(block.id, () => b)}
                             onRemove={() => removeBlock(block.id)}
                             onEdit={() => setEditingBlockId(block.id)}
-                            uploadStatus={uploads[block.id] ?? null}
+                            onToast={showToast}
                         />
                     ))}
                     {isEditing && content.blocks.length === 0 && (
@@ -1002,10 +850,6 @@ export default function App() {
                         setEditingBlockId(null);
                     }}
                     onClose={() => setEditingBlockId(null)}
-                    onUpload={(file) => startImageUpload(editingBlock.id, file)}
-                    uploadStatus={uploads[editingBlock.id] ?? null}
-                    uploadError={uploadErrors[editingBlock.id] ?? null}
-                    maxStoreBytes={MAX_TX_BYTES}
                 />
             )}
 
@@ -1018,44 +862,10 @@ export default function App() {
                         <span className="field-label">Account</span>
                         <span className="account-chip">
                             <span
-                                className={`source-dot source-${activeAccount?.source ?? "none"}`}
+                                className={`source-dot source-${activeAccount.source}`}
                             />
-                            {activeAccount
-                                ? `${activeAccount.displayName} (${activeAccount.source})`
-                                : resolvingOwned
-                                  ? "connecting…"
-                                  : "no signer"}
+                            {`${activeAccount.displayName} (${activeAccount.source})`}
                         </span>
-                        <label className="checkbox">
-                            <input
-                                type="checkbox"
-                                checked={useOwnedAccount}
-                                onChange={(e) => setUseOwnedAccount(e.target.checked)}
-                                disabled={busy}
-                            />
-                            <span>
-                                Sign with my own account
-                                <span className="checkbox-hint"> — default is //Bob</span>
-                            </span>
-                        </label>
-                        {useOwnedAccount && !hostAccount && !extensionAccount && (
-                            <button
-                                className="pill pill-secondary"
-                                onClick={connectExtension}
-                                disabled={!hasInjectedExtension() || resolvingOwned || busy}
-                            >
-                                Connect browser wallet
-                            </button>
-                        )}
-                        {showOwnedHint && (
-                            <p className="hint">
-                                No host signer detected. Open in{" "}
-                                <strong>Polkadot Desktop</strong> or{" "}
-                                <strong>Polkadot Mobile</strong>, connect a browser wallet,
-                                or untick to deploy as //Bob.
-                            </p>
-                        )}
-                        {ownedError && <p className="hint subtle">{ownedError}</p>}
                     </div>
 
                     <div className="deploy-field">
@@ -1077,28 +887,6 @@ export default function App() {
                             {`https://${domain || "<auto>"}.dot.li`}
                         </span>
                     </div>
-
-                    {activeAccount?.source === "host" && !hostAllowancesGranted && (
-                        <div className="deploy-field">
-                            <p className="hint">
-                                Waiting on the Polkadot host to grant the Bulletin
-                                and smart-contract allowances this deploy needs.
-                                Approve the allocation request in your host, then
-                                retry.
-                            </p>
-                            <button
-                                className="pill pill-secondary"
-                                onClick={() =>
-                                    void signerManager.requestResourceAllocation()
-                                }
-                                disabled={busy || resourceState.status === "requesting"}
-                            >
-                                {resourceState.status === "requesting"
-                                    ? "Requesting allowances…"
-                                    : "Request host allowances"}
-                            </button>
-                        </div>
-                    )}
 
                     <button
                         className="pill pill-primary pill-wide"
@@ -1485,7 +1273,7 @@ function BlockView({
     onUpdate,
     onRemove,
     onEdit,
-    uploadStatus,
+    onToast,
 }: {
     block: Block;
     accentColor: string;
@@ -1493,7 +1281,7 @@ function BlockView({
     onUpdate: (next: Block) => void;
     onRemove: () => void;
     onEdit: () => void;
-    uploadStatus?: string | null;
+    onToast: (message: string) => void;
 }) {
     const linkStyle =
         block.type === "link" && block.variant === "pill"
@@ -1568,6 +1356,18 @@ function BlockView({
                             rel="noopener"
                             className="site-link"
                             style={linkStyle}
+                            // In preview (and inside a host webview) `target=_blank`
+                            // navigation is blocked, so a click would do nothing.
+                            // Copy the URL + toast instead — the same fallback the
+                            // deployed page uses.
+                            onClick={(e) => {
+                                e.preventDefault();
+                                const url = block.type === "link" ? block.url : "";
+                                navigator.clipboard
+                                    ?.writeText(url)
+                                    .then(() => onToast("Link copied"))
+                                    .catch(() => onToast(url));
+                            }}
                         >
                             {block.label}
                         </a>
@@ -1590,7 +1390,7 @@ function BlockView({
                         tabIndex={0}
                         onKeyDown={(e) => e.key === "Enter" && onEdit()}
                     >
-                        {uploadStatus ?? "No image yet — tap to edit"}
+                        No image yet — tap to edit
                     </div>
                 ) : null)}
             {block.type === "divider" && <hr className="site-divider" />}
@@ -1606,27 +1406,12 @@ function BlockEditSheet({
     onUpdate,
     onDelete,
     onClose,
-    onUpload,
-    uploadStatus,
-    uploadError,
-    maxStoreBytes,
 }: {
     block: Block;
     onUpdate: (next: Block) => void;
     onDelete: () => void;
     onClose: () => void;
-    /** Fire-and-forget: upload state is owned by App (keyed by block id), so
-     * it survives this sheet closing and reopening mid-upload. */
-    onUpload: (file: File) => void;
-    uploadStatus: string | null;
-    uploadError: string | null;
-    maxStoreBytes: number;
 }) {
-    // URL entry is the power-user path — hidden behind a toggle by default.
-    const [showUrlField, setShowUrlField] = useState(false);
-    const uploading = uploadStatus !== null;
-    const hasImage =
-        block.type === "image" && !!block.url && block.url !== "https://";
     const kind =
         block.type === "link"
             ? block.variant === "pill"
@@ -1671,78 +1456,17 @@ function BlockEditSheet({
                 )}
                 {block.type === "image" && (
                     <>
-                        <label
-                            className={`sheet-media ${hasImage ? "has-img" : ""}`}
-                        >
+                        <label className="sheet-field">
+                            <span>Image link</span>
                             <input
-                                type="file"
-                                accept="image/*"
-                                disabled={uploading}
-                                onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    e.target.value = "";
-                                    if (file) onUpload(file);
-                                }}
+                                type="url"
+                                value={block.url}
+                                onChange={(e) =>
+                                    onUpdate({ ...block, url: e.target.value })
+                                }
+                                placeholder="https://"
                             />
-                            {uploading && uploadStatus ? (
-                                <div className="sheet-media-empty">
-                                    <StepProgress
-                                        steps={UPLOAD_STEPS}
-                                        step={stepForUploadStatus(uploadStatus)}
-                                        status={uploadStatus}
-                                    />
-                                </div>
-                            ) : hasImage ? (
-                                <>
-                                    <img src={block.url} alt={block.alt} />
-                                    <span
-                                        className="sheet-media-chip"
-                                        aria-hidden="true"
-                                    >
-                                        Replace
-                                    </span>
-                                </>
-                            ) : (
-                                <div className="sheet-media-empty">
-                                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                        <path d="M12 16V4" />
-                                        <path d="m6 10 6-6 6 6" />
-                                        <path d="M4 20h16" />
-                                    </svg>
-                                    <span>Tap to add an image</span>
-                                    <span className="sheet-media-note">
-                                        Optimized automatically — up to{" "}
-                                        {MAX_IMAGE_DIMENSION}px,{" "}
-                                        {(maxStoreBytes / 1024 / 1024).toFixed(0)} MB
-                                    </span>
-                                </div>
-                            )}
                         </label>
-                        {uploadError && (
-                            <pre className="image-upload-error">{uploadError}</pre>
-                        )}
-                        {showUrlField ? (
-                            <label className="sheet-field">
-                                <span>Image link</span>
-                                <input
-                                    type="url"
-                                    value={block.url}
-                                    onChange={(e) =>
-                                        onUpdate({ ...block, url: e.target.value })
-                                    }
-                                    placeholder="https://"
-                                    autoFocus
-                                />
-                            </label>
-                        ) : (
-                            <button
-                                type="button"
-                                className="sheet-link-toggle"
-                                onClick={() => setShowUrlField(true)}
-                            >
-                                Use an image link instead
-                            </button>
-                        )}
                         <label className="sheet-field">
                             <span>Alt text</span>
                             <input
@@ -1839,10 +1563,33 @@ function VariantToggle({
 }
 
 // Heuristic hint mapping common DotNS failures to actionable next steps.
-// The error strings come from pallet-revive dispatch errors, JSON-serialised
-// in submit-and-wait, so they're greppable.
+// Most strings are pallet-revive dispatch errors (JSON-serialised in
+// submit-and-wait, so they're greppable) — but NOT all. Client-side
+// transaction-tracking glitches surface here too, and mislabelling those as
+// on-chain dispatch errors is what made this screen useless. So we detect the
+// client-side signature first, before assuming pallet-revive.
 function DotErrorHint({ message }: { message: string }) {
     const lower = message.toLowerCase();
+
+    // Client-side chainHead race in polkadot-api's tx-follower (track-tx):
+    // a tracked block gets pruned mid-search and an unguarded `.children`
+    // access throws. NOT an on-chain failure — the extrinsic may well have
+    // landed. We ship a patch (patches/…observable-client….patch) that guards
+    // it; this hint covers any residual transient chainHead hiccup.
+    if (
+        lower.includes("reading 'children'") ||
+        lower.includes("reading \"children\"") ||
+        lower.includes("blocks.get")
+    ) {
+        return (
+            <p className="hint">
+                <strong>Likely cause:</strong> a transient chain-follower glitch in
+                the client (a tracked block was pruned mid-search) — <em>not</em> an
+                on-chain failure, so your extrinsic may have actually landed. Just
+                retry; if the name now shows as taken, it went through.
+            </p>
+        );
+    }
 
     if (
         lower.includes("balance") ||
@@ -1909,9 +1656,10 @@ function DotErrorHint({ message }: { message: string }) {
 
     return (
         <p className="hint">
-            Unknown failure. The dispatch-error JSON above is from pallet-revive —
-            pasting it into chat will help diagnose. Common culprits: //Bob has no
-            PAS for fees, name already taken, or the AH-Next RPC choked.
+            Unknown failure. The message above may be a pallet-revive dispatch error
+            (insufficient PAS, name already taken) <em>or</em> a client/RPC glitch —
+            pasting the full text (and the browser console stack trace) into chat
+            will help diagnose. Retrying is usually safe.
         </p>
     );
 }

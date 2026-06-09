@@ -1,61 +1,46 @@
-// Cached PAPI client for Asset Hub Next (DotNS).
+// Asset Hub Next client for the DotNS flow.
 //
-// The Asset Hub client is host-routed: inside the Polkadot host (Desktop/Mobile
-// webview or iframe) it goes through the host's chain connection via
-// `createPapiProvider(genesisHash)`, with the direct WebSocket kept as the
-// `__fallback`. When running standalone (the //Bob dev path always is), we use
-// the direct WS provider straight away.
+// IMPORTANT: this goes through the product-sdk's `getChainAPI`, NOT a bespoke
+// `createClient(createPapiProvider(...))`. We learned the hard way that
+// hand-rolling the client produces a chainHead stream observable-client can't
+// keep consistent over the host transport — every DotNS call crashed in-host
+// with cascading chainHead errors (`reading 'children'`, then `toBlockInfo`
+// on undefined, …). `getChainAPI` is the exact path playground-app uses
+// successfully inside the same hosts, so we use it verbatim:
+//   - one cached client per chain (no duplicate chainHead subscriptions),
+//   - host provider with no WS fallback (the fallback was a prime suspect),
+//   - `getUnsafeApi()` for everything, so calls bind to LIVE chain metadata and
+//     we don't depend on a (periodically-stale) published descriptor.
 //
-// `createPapiProvider` calls `transport.isCorrectEnvironment()` at construction
-// and THROWS ("PapiProvider can only be used in a product environment") when not
-// in a host — it does not lazily fall back at construct time. So we guard it
-// with `isInsideContainerSync()` (the same iframe/webview check the transport
-// uses) and only construct the host provider when we're actually in a host.
-//
-// The Bulletin store path is host-routed separately by CloudStorageClient (T3);
-// it does not go through this module.
+// `getChainAPI` throws when not inside a host. That's fine: the DotNS flow only
+// runs on the host-gated deploy path (standalone is preview-only).
 
-import { createClient, type TypedApi } from "polkadot-api";
-import { getWsProvider } from "polkadot-api/ws";
-import { createPapiProvider } from "@novasamatech/host-api-wrapper";
-import { isInsideContainerSync } from "@parity/product-sdk-host";
-// Locally-generated descriptors via `papi add` against the live chains.
-// The pre-published `@parity/product-sdk-descriptors` package is too stale for
-// the v2 runtime — runtime-API entry hashes mismatch, producing
-// "Incompatible runtime entry RuntimeCall(ReviveApi_call)" at dry-run time.
-// Re-generate via `npx papi generate` whenever the chain's runtime upgrades.
-import { pah } from "@polkadot-api/descriptors";
-import { ASSET_HUB_GENESIS, ASSET_HUB_RPC } from "./constants.ts";
+import { getChainAPI } from "@parity/product-sdk-chain-client";
 
-type AssetHubApi = TypedApi<typeof pah>;
-type Client = ReturnType<typeof createClient>;
+const CHAIN = "paseo";
 
-// Cached for the page lifetime — isInsideContainerSync() is evaluated once at
-// first call. Environment (host vs. standalone) is assumed not to change within
-// a session, which holds for this SPA (no SSR, no dynamic context switches).
-let assetHubClient: Client | null = null;
-let assetHubApi: AssetHubApi | null = null;
-let assetHubUnsafeApi: ReturnType<Client["getUnsafeApi"]> | null = null;
+type AssetHubClient = {
+    // The raw PAPI client for Asset Hub.
+    client: Awaited<ReturnType<typeof getChainAPI>>["raw"]["assetHub"];
+    // Unsafe API bound to live metadata — used for both ReviveApi runtime calls
+    // (dry-run / address) and Revive extrinsic construction.
+    unsafeApi: ReturnType<Awaited<ReturnType<typeof getChainAPI>>["raw"]["assetHub"]["getUnsafeApi"]>;
+};
 
-function getAssetHubProvider() {
-    // Construct the host provider only when in a host — otherwise it throws.
-    // The direct WS provider is passed as `__fallback` so that even in-host,
-    // if the host can't serve this chain, papi falls back to a direct dial.
-    if (isInsideContainerSync()) {
-        return createPapiProvider(ASSET_HUB_GENESIS, getWsProvider(ASSET_HUB_RPC));
+// Cache the in-flight/resolved promise so concurrent callers share one client.
+// Reset on rejection so a later retry can re-establish the connection.
+let assetHubPromise: Promise<AssetHubClient> | null = null;
+
+export function getAssetHubClient(): Promise<AssetHubClient> {
+    if (!assetHubPromise) {
+        assetHubPromise = (async () => {
+            const chain = await getChainAPI(CHAIN);
+            const client = chain.raw.assetHub;
+            return { client, unsafeApi: client.getUnsafeApi() };
+        })().catch((err) => {
+            assetHubPromise = null;
+            throw err;
+        });
     }
-    return getWsProvider(ASSET_HUB_RPC);
-}
-
-export function getAssetHubClient(): {
-    client: Client;
-    api: AssetHubApi;
-    unsafeApi: ReturnType<Client["getUnsafeApi"]>;
-} {
-    if (!assetHubClient) {
-        assetHubClient = createClient(getAssetHubProvider());
-        assetHubApi = assetHubClient.getTypedApi(pah);
-        assetHubUnsafeApi = assetHubClient.getUnsafeApi();
-    }
-    return { client: assetHubClient, api: assetHubApi!, unsafeApi: assetHubUnsafeApi! };
+    return assetHubPromise;
 }

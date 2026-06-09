@@ -1,0 +1,25 @@
+diff --git a/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/streams/pinned-blocks.js b/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/streams/pinned-blocks.js
+index f1ac751..a334afc 100644
+--- a/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/streams/pinned-blocks.js
++++ b/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/streams/pinned-blocks.js
+@@ -150,6 +150,7 @@ const getPinnedBlocks$ = (follow$, call$, getCachedMetadata$, setCachedMetadata,
+             acc.blocks.get(hash).recovering = false;
+           } else {
+             const parentNode = acc.blocks.get(parent);
++            if (!parentNode) return acc;
+             parentNode.children.add(hash);
+             const number = parentNode.number + 1;
+             const block = {
+diff --git a/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/track-tx.js b/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/track-tx.js
+index bedca55..7b80d99 100644
+--- a/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/track-tx.js
++++ b/node_modules/polkadot-api/node_modules/@polkadot-api/observable-client/dist/chainHead/track-tx.js
+@@ -70,7 +70,7 @@ const getTrackTx = (blocks$, newBlocks$, getBody, getIsValid, getEvents, hodl) =
+       if (isSettled) releaseDescendants(hash);
+       return isSettled ? of(analyzed) : blocks$.pipe(
+         whileBlockActive(hash),
+-        mergeMap((x) => x.blocks.get(hash).children),
++        mergeMap((x) => x.blocks.get(hash)?.children ?? []),
+         distinct(),
+         mergeMap((hash2) => findInBranch(hash2, tx, alreadyPresent)),
+         startWith(analyzed)
