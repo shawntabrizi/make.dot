@@ -105,7 +105,7 @@ export async function tryExtensionAccount(): Promise<ActiveAccount | null> {
     const names = getInjectedExtensions();
     if (names.length === 0) return null;
 
-    const extension = await connectInjectedExtension(names[0], "make.dot");
+    const extension = await connectInjectedExtension(names[0], "hello-playground");
     const accounts = extension.getAccounts();
     if (accounts.length === 0) return null;
 

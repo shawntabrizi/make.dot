@@ -1,8 +1,8 @@
-# make.dot
+# hello-playground
 
-> Make a `.dot` site by tapping on it, then deploy it to IPFS and a `.dot` name in about a minute — no backend, no build step, no hosting account.
+> Build a website by tapping on it, then deploy it to IPFS and a `.dot` name in about a minute — no backend, no build step, no hosting account.
 
-make.dot is a single-page WYSIWYG site builder that runs entirely in your browser. You edit blocks (headings, text, buttons, images) directly on the page, watch the exact bytes that will be deployed, and publish to the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain) (served over IPFS) with a DotNS `.dot` name pointing at it. It's built to run inside Polkadot Desktop / Polkadot Mobile as a hosted app, and falls back to browser wallets when standalone.
+hello-playground is a single-page WYSIWYG site builder that runs entirely in your browser. You edit blocks (headings, text, buttons, images) directly on the page, watch the exact bytes that will be deployed, and publish to the [Polkadot Bulletin Chain](https://github.com/paritytech/polkadot-bulletin-chain) (served over IPFS) with a DotNS `.dot` name pointing at it. It's built to run inside Polkadot Desktop / Polkadot Mobile as a hosted app, and falls back to browser wallets when standalone.
 
 <!-- TODO: hero screenshot — the editor with the Profile template open, action bar visible (assets/screenshots/editor.png, ~700px wide) -->
 
@@ -51,11 +51,11 @@ Open the printed localhost URL. For local development outside a host, tick **Use
 
 ## Deploying the Builder Itself
 
-The app deploys with the [`playground` CLI](https://github.com/paritytech/dotdot-deployer) to `make.dot`:
+The app deploys with the [`playground` CLI](https://github.com/paritytech/dotdot-deployer) to `hello-playground.dot`:
 
 ```bash
 npm run build
-playground deploy --domain make --no-build --buildDir dist --signer dev
+playground deploy --domain hello-playground --no-build --buildDir dist --signer dev
 ```
 
 `playground init` pairs the CLI with your phone the first time. Use `--signer phone` to sign with your own account — note the upload itself exceeds the mobile signing channel's message limit, so `dev` is the practical choice for the multi-megabyte bundle.

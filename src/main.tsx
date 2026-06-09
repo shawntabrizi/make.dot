@@ -37,7 +37,7 @@ if (window.self !== window.top) {
 // session-scoped guard stops a reload loop when the failure is real network
 // trouble rather than a version skew.
 window.addEventListener("vite:preloadError", (event) => {
-    const KEY = "make.dot:chunk-reload-at";
+    const KEY = "hello-playground:chunk-reload-at";
     const last = Number(sessionStorage.getItem(KEY) ?? "0");
     if (Date.now() - last < 30_000) return; // recently reloaded — surface the error
     sessionStorage.setItem(KEY, String(Date.now()));

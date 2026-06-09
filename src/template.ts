@@ -329,7 +329,7 @@ ${bodyHtml}${script}
 export function wrapMain(inner: string): string {
     return `<main>
     ${inner}
-    <footer>made with <a href="https://github.com/shawntabrizi/make.dot" target="_blank" rel="noopener">make.dot</a></footer>
+    <footer>made with <a href="https://github.com/shawntabrizi/hello-playground" target="_blank" rel="noopener">hello-playground</a></footer>
 </main>`;
 }
 

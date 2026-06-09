@@ -19,7 +19,7 @@ import {
 import { RequestCredentialsErr } from "@novasamatech/host-api";
 import { AccountId, type PolkadotSigner } from "polkadot-api";
 
-const DEFAULT_PRODUCT_ACCOUNT_DOT_NS = "make.dot";
+const DEFAULT_PRODUCT_ACCOUNT_DOT_NS = "hello-playground.dot";
 const PRODUCT_ACCOUNT_DERIVATION_INDEX = 0;
 
 function isLoopback(hostname: string): boolean {
@@ -34,7 +34,7 @@ export function getProductAccountIdentifier(): string {
     if (isLoopback(hostname)) return host;
 
     // dotli exposes hosted products as `<name>.<gateway>` (e.g.
-    // `make.dot.li`). Map back to the canonical `<name>.dot`
+    // `hello-playground.dot.li`). Map back to the canonical `<name>.dot`
     // identifier the host signs against.
     const labels = hostname.toLowerCase().split(".");
     if (labels.length === 3) return `${labels[0]}.dot`;
@@ -145,7 +145,7 @@ export async function connectHostAccount(): Promise<HostState> {
 
 /** Open the host's sign-in UI, then re-resolve the product account. */
 export async function signInToHost(): Promise<HostState> {
-    await accountsProvider.requestLogin("Sign in to deploy with make.dot");
+    await accountsProvider.requestLogin("Sign in to deploy with hello-playground");
     return connectHostAccount();
 }
 

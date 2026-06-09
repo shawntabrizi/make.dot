@@ -1,6 +1,6 @@
 # Architecture
 
-make.dot is a pure client-side dApp: no backend, no CORS proxy, no native binaries. Everything — editing, rendering, image optimization, chain interaction — happens in the browser. This document explains how the pieces fit and, more importantly, *why* they're shaped the way they are. Several decisions here were learned empirically against live chains and hosts; those are marked so future maintainers don't re-learn them the hard way.
+hello-playground is a pure client-side dApp: no backend, no CORS proxy, no native binaries. Everything — editing, rendering, image optimization, chain interaction — happens in the browser. This document explains how the pieces fit and, more importantly, *why* they're shaped the way they are. Several decisions here were learned empirically against live chains and hosts; those are marked so future maintainers don't re-learn them the hard way.
 
 ## The one-sentence model
 

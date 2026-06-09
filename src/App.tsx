@@ -144,7 +144,7 @@ function makeBlockId(): string {
 
 // Draft autosave: the full editing state, debounced into localStorage so a
 // refresh/crash never loses work. Undo history is session-only by design.
-const STORAGE_KEY = "make.dot.draft.v1";
+const STORAGE_KEY = "hello-playground.draft.v1";
 
 interface Draft {
     mode: EditorMode;
@@ -899,12 +899,12 @@ export default function App() {
                     <footer className="site-footer">
                         made with{" "}
                         <a
-                            href="https://github.com/shawntabrizi/make.dot"
+                            href="https://github.com/shawntabrizi/hello-playground"
                             target="_blank"
                             rel="noopener"
                             style={{ color: content.accentColor }}
                         >
-                            make.dot
+                            hello-playground
                         </a>
                     </footer>
                 </article>

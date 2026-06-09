@@ -1,5 +1,5 @@
 {
-  "name": "make.dot",
+  "name": "hello-playground",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
-    "deploy:dot": "dot deploy --domain make",
+    "deploy:dot": "dot deploy --domain hello-playground",
     "postinstall": "papi generate"
   },
   "dependencies": {
