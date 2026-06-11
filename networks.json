@@ -38,6 +38,25 @@
                 "contentResolver": "0xBD003d5Dd04E68aC60d529a46AEfBdEf8941868C",
                 "popRules": "0xF209a15e8a10D208bb4d3e3c56D9EB73a5934C26"
             }
+        },
+        "summit": {
+            "name": "Summit",
+            "description": "Web3 Summit Network",
+            "bulletinRpc": "wss://summit-bulletin-rpc.polkadot.io",
+            "assetHubRpc": "wss://summit-asset-hub-rpc.polkadot.io",
+            "assetHubGenesis": "0xf388dc6d6cdf6fb77eac3c4a91f31bc0c8642b142f1a757512ab7849f9f70660",
+            "ipfsGateway": "https://summit-ipfs.polkadot.io",
+            "dotHost": "dot.li",
+            "nativeToEthRatio": 100000000,
+            "bulletinFaucetUrl": "https://paritytech.github.io/polkadot-bulletin-chain/authorizations?tab=faucet",
+            "pasFaucetUrl": "https://faucet.polkadot.io/",
+            "contracts": {
+                "registry": "0xFb7AB7E142ED0248D77198CA8722D67C1930D783",
+                "registrar": "0xf3969bCBE60463302306663C62A6A8ef91ab9aA5",
+                "registrarController": "0xA68a5b2A6be6d014be0dB07c0ed4bacc4A6A570A",
+                "contentResolver": "0xf110e5799c3f0adb8ED885C02c45Ecfe7fD86226",
+                "popRules": "0x6331e51C9AfC73BfE12562fd160BA2c66A73f984"
+            }
         }
     }
 }
